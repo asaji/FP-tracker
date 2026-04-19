@@ -11,6 +11,7 @@ def _connect(db_path: str) -> sqlite3.Connection:
 
 
 def init_db(db_path: str):
+    _migrate(db_path)
     with _connect(db_path) as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS routes (
@@ -25,7 +26,8 @@ def init_db(db_path: str):
                 adults        INTEGER NOT NULL DEFAULT 1,
                 seat_type     TEXT    NOT NULL DEFAULT 'ECONOMY',
                 active        INTEGER NOT NULL DEFAULT 1,
-                created_at    TEXT    NOT NULL
+                created_at    TEXT    NOT NULL,
+                day_offset    INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS price_history (
@@ -43,6 +45,14 @@ def init_db(db_path: str):
                 value TEXT NOT NULL
             );
         """)
+
+
+def _migrate(db_path: str):
+    with _connect(db_path) as conn:
+        try:
+            conn.execute("ALTER TABLE routes ADD COLUMN day_offset INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass  # column already exists
 
 
 def _now() -> str:
@@ -69,19 +79,28 @@ def get_all_routes(db_path: str) -> list[dict]:
 
 def add_route(db_path: str, trip_id: int | None, leg_label: str, origin: str,
               destination: str, departure_date: str, non_stop_only: bool,
-              airlines: list | None, adults: int, seat_type: str) -> int:
+              airlines: list | None, adults: int, seat_type: str,
+              day_offset: int = 0) -> int:
     with _connect(db_path) as conn:
         cur = conn.execute(
             """INSERT INTO routes
                (trip_id, leg_label, origin, destination, departure_date,
-                non_stop_only, airlines, adults, seat_type, active, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+                non_stop_only, airlines, adults, seat_type, active, created_at, day_offset)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
             (trip_id, leg_label, origin.upper(), destination.upper(),
              departure_date, int(non_stop_only),
              json.dumps(airlines) if airlines else None,
-             adults, seat_type, _now())
+             adults, seat_type, _now(), day_offset)
         )
     return cur.lastrowid
+
+
+def delete_routes_batch(db_path: str, route_ids: list[int]):
+    if not route_ids:
+        return
+    placeholders = ','.join('?' * len(route_ids))
+    with _connect(db_path) as conn:
+        conn.execute(f"DELETE FROM routes WHERE id IN ({placeholders})", route_ids)
 
 
 def next_trip_id(db_path: str) -> int:

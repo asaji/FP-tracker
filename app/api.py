@@ -1,12 +1,14 @@
 import json
 import threading
+from datetime import datetime, timedelta
 from flask import Blueprint, current_app, jsonify, render_template, request
 
 from .db import (
-    add_route, delete_route, get_all_routes, get_latest_price_for_routes,
-    get_previous_price_for_routes, get_price_history, get_setting, next_trip_id,
-    set_setting,
+    add_route, delete_route, delete_routes_batch, get_all_routes,
+    get_latest_price_for_routes, get_previous_price_for_routes,
+    get_price_history, get_setting, next_trip_id, set_setting,
 )
+from .pushover import send_pushover
 from .scheduler import check_all_routes, reschedule
 
 bp = Blueprint('api', __name__)
@@ -14,6 +16,14 @@ bp = Blueprint('api', __name__)
 
 def _db():
     return current_app.config['DB_PATH']
+
+
+def _date_variants(date_str: str) -> list[tuple[str, int]]:
+    base = datetime.strptime(date_str, '%Y-%m-%d')
+    return [
+        ((base + timedelta(days=offset)).strftime('%Y-%m-%d'), offset)
+        for offset in (-1, 0, 1)
+    ]
 
 
 # ── Pages ──────────────────────────────────────────────────────────────────
@@ -62,27 +72,20 @@ def create_routes():
     airlines = [a.strip().upper() for a in data.get('airlines', []) if a.strip()] or None
 
     created = []
+    tid = next_trip_id(_db())
 
-    if trip_type == 'round_trip':
-        tid = next_trip_id(_db())
-        for leg_label, seg_key in [('outbound', 'outbound'), ('return', 'return')]:
-            seg = data.get(seg_key)
-            if not seg:
-                continue
+    legs = [('outbound', data.get('outbound', data))]
+    if trip_type == 'round_trip' and data.get('return'):
+        legs.append(('return', data['return']))
+
+    for leg_label, seg in legs:
+        for date_str, offset in _date_variants(seg['departure_date']):
             rid = add_route(
                 _db(), tid, leg_label,
-                seg['origin'], seg['destination'], seg['departure_date'],
-                non_stop, airlines, adults, seat_type,
+                seg['origin'], seg['destination'], date_str,
+                non_stop, airlines, adults, seat_type, offset,
             )
             created.append(rid)
-    else:
-        seg = data.get('outbound', data)
-        rid = add_route(
-            _db(), None, 'outbound',
-            seg['origin'], seg['destination'], seg['departure_date'],
-            non_stop, airlines, adults, seat_type,
-        )
-        created.append(rid)
 
     return jsonify({'created': created}), 201
 
@@ -91,6 +94,14 @@ def create_routes():
 def remove_route(route_id: int):
     delete_route(_db(), route_id)
     return jsonify({'deleted': route_id})
+
+
+@bp.route('/api/routes/batch', methods=['DELETE'])
+def remove_routes_batch():
+    data = request.get_json(force=True)
+    ids = [int(i) for i in data.get('ids', [])]
+    delete_routes_batch(_db(), ids)
+    return jsonify({'deleted': ids})
 
 
 # ── Price history ──────────────────────────────────────────────────────────
@@ -112,6 +123,19 @@ def manual_poll():
     return jsonify({'status': 'started'})
 
 
+# ── Notifications ──────────────────────────────────────────────────────────
+
+@bp.route('/api/notify/test', methods=['POST'])
+def test_notification():
+    ok = send_pushover(
+        'Your Flight Price Tracker notifications are working correctly.',
+        title='✈ Test Notification'
+    )
+    if ok:
+        return jsonify({'status': 'sent'})
+    return jsonify({'status': 'error', 'detail': 'Pushover not configured or request failed'}), 400
+
+
 # ── Settings ───────────────────────────────────────────────────────────────
 
 @bp.route('/api/settings', methods=['GET'])
@@ -124,7 +148,7 @@ def get_settings():
 def update_settings():
     data = request.get_json(force=True)
     interval = int(data.get('poll_interval_minutes', 480))
-    interval = max(15, min(interval, 10080))  # clamp: 15 min – 1 week
+    interval = max(15, min(interval, 10080))
     set_setting(_db(), 'poll_interval_minutes', str(interval))
     reschedule(_db(), interval)
     return jsonify({'poll_interval_minutes': interval})

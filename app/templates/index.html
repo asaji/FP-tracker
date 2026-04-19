@@ -30,7 +30,7 @@
 </nav>
 
 <!-- Main content -->
-<div class="container-fluid px-3 py-3">
+<div class="container-fluid px-3 py-3" style="padding-bottom: 90px">
   <div id="routes-grid" class="row g-3">
     <div class="col-12 text-center py-5 text-secondary" id="empty-state">
       <i class="bi bi-airplane display-3 d-block mb-3 opacity-25"></i>
@@ -38,6 +38,23 @@
       <button class="btn btn-primary mt-2" onclick="openAddModal()">
         <i class="bi bi-plus-lg me-1"></i>Add your first route
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Trip Builder bar (sticky bottom) ─────────────────────────────── -->
+<div id="trip-builder" class="trip-builder d-none">
+  <div class="container-fluid px-3">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <span class="fw-semibold text-primary"><i class="bi bi-calculator me-1"></i>Trip Builder</span>
+      <div id="trip-builder-items" class="d-flex gap-2 flex-wrap flex-grow-1"></div>
+      <div class="d-flex align-items-center gap-3 ms-auto">
+        <span class="text-secondary small" id="trip-builder-count"></span>
+        <span class="fw-bold fs-5" id="trip-builder-total"></span>
+        <button class="btn btn-sm btn-outline-secondary" onclick="clearTripBuilder()">
+          <i class="bi bi-x-lg me-1"></i>Clear
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -51,6 +68,10 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
+        <div class="alert alert-info small py-2 mb-3">
+          <i class="bi bi-info-circle me-1"></i>
+          Prices will be tracked for your selected date <strong>plus the day before and after</strong> so you can compare flexibility.
+        </div>
 
         <!-- Trip type toggle -->
         <div class="mb-3">
@@ -58,15 +79,14 @@
             <input type="radio" class="btn-check" name="tripType" id="typeOneWay" value="one_way" checked>
             <label class="btn btn-outline-primary" for="typeOneWay">One-way</label>
             <input type="radio" class="btn-check" name="tripType" id="typeRoundTrip" value="round_trip">
-            <label class="btn btn-outline-primary" for="typeRoundTrip">Round-trip (tracked separately)</label>
+            <label class="btn btn-outline-primary" for="typeRoundTrip">Round-trip (legs tracked separately)</label>
           </div>
         </div>
 
         <!-- Outbound segment -->
         <div class="card bg-dark border-secondary mb-3">
           <div class="card-header border-secondary text-secondary small">
-            <i class="bi bi-arrow-right-circle me-1"></i>
-            <span id="outbound-label">Flight</span>
+            <i class="bi bi-arrow-right-circle me-1"></i><span id="outbound-label">Flight</span>
           </div>
           <div class="card-body pb-2">
             <div class="row g-2">
@@ -91,7 +111,7 @@
           </div>
         </div>
 
-        <!-- Return segment (hidden for one-way) -->
+        <!-- Return segment -->
         <div class="card bg-dark border-secondary mb-3 d-none" id="return-segment">
           <div class="card-header border-secondary text-secondary small">
             <i class="bi bi-arrow-left-circle me-1"></i>Return
@@ -123,8 +143,7 @@
         <div class="row g-2">
           <div class="col-sm-4">
             <label class="form-label small mb-1">Adults</label>
-            <input type="number" class="form-control form-control-sm" id="opt-adults"
-                   value="1" min="1" max="9">
+            <input type="number" class="form-control form-control-sm" id="opt-adults" value="1" min="1" max="9">
           </div>
           <div class="col-sm-4">
             <label class="form-label small mb-1">Cabin Class</label>
@@ -145,8 +164,7 @@
             <label class="form-label small mb-1">
               Airlines <span class="text-secondary">(optional — IATA codes, comma-separated e.g. AS, DL, UA)</span>
             </label>
-            <input type="text" class="form-control form-control-sm" id="opt-airlines"
-                   placeholder="Leave blank for any airline">
+            <input type="text" class="form-control form-control-sm" id="opt-airlines" placeholder="Leave blank for any airline">
           </div>
         </div>
 
@@ -164,7 +182,7 @@
 
 <!-- ── Settings Modal ────────────────────────────────────────────────── -->
 <div class="modal fade" id="settingsModal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered modal-sm">
+  <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content border-secondary">
       <div class="modal-header border-secondary">
         <h5 class="modal-title"><i class="bi bi-gear me-2"></i>Settings</h5>
@@ -172,10 +190,21 @@
       </div>
       <div class="modal-body">
         <label class="form-label small mb-1">Poll Interval (minutes)</label>
-        <input type="number" class="form-control form-control-sm" id="setting-interval"
-               min="15" max="10080" placeholder="480">
-        <div class="text-secondary small mt-1">Min 15 min · Max 10080 (1 week)<br>
-          Default 480 = 3× per day</div>
+        <input type="number" class="form-control form-control-sm mb-1" id="setting-interval" min="15" max="10080" placeholder="480">
+        <div class="text-secondary small mb-4">Min 15 min · Max 10080 (1 week) · Default 480 = 3× per day</div>
+
+        <hr class="border-secondary">
+
+        <div class="d-flex align-items-center justify-content-between mt-3">
+          <div>
+            <div class="small fw-semibold">Pushover Notifications</div>
+            <div class="text-secondary" style="font-size:0.75rem">Send a test alert to verify your credentials are working.</div>
+          </div>
+          <button class="btn btn-sm btn-outline-secondary ms-3" id="btn-test-notify" onclick="testNotification()">
+            <i class="bi bi-bell me-1"></i>Send Test
+          </button>
+        </div>
+        <div id="notify-result" class="mt-2 small d-none"></div>
       </div>
       <div class="modal-footer border-secondary">
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
@@ -185,7 +214,7 @@
   </div>
 </div>
 
-<!-- ── Route Detail Modal (expanded chart) ──────────────────────────── -->
+<!-- ── Expanded chart modal ──────────────────────────────────────────── -->
 <div class="modal fade" id="chartModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content border-secondary">

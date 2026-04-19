@@ -5,12 +5,14 @@ let routes = [];
 const miniCharts = {};
 let expandedChart = null;
 
+// trip builder: map of route_id -> {label, price}
+const tripSelection = new Map();
+
 // ── Init ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   loadRoutes();
   loadSettings();
 
-  // Trip type toggle
   document.querySelectorAll('input[name="tripType"]').forEach(radio => {
     radio.addEventListener('change', e => {
       const isRound = e.target.value === 'round_trip';
@@ -26,10 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function autoFillReturn() {
   if (document.getElementById('typeRoundTrip').checked) {
-    const origin = document.getElementById('out-origin').value;
-    const dest = document.getElementById('out-dest').value;
-    document.getElementById('ret-origin').value = dest;
-    document.getElementById('ret-dest').value = origin;
+    document.getElementById('ret-origin').value = document.getElementById('out-dest').value;
+    document.getElementById('ret-dest').value = document.getElementById('out-origin').value;
   }
 }
 
@@ -46,11 +46,7 @@ async function loadRoutes() {
 }
 
 function updateLastChecked(routes) {
-  const timestamps = routes
-    .map(r => r.last_checked)
-    .filter(Boolean)
-    .sort()
-    .reverse();
+  const timestamps = routes.map(r => r.last_checked).filter(Boolean).sort().reverse();
   const el = document.getElementById('last-checked-text');
   if (timestamps.length) {
     el.textContent = `Last checked ${timeAgo(timestamps[0])}`;
@@ -58,11 +54,53 @@ function updateLastChecked(routes) {
   }
 }
 
+// ── Grouping ───────────────────────────────────────────────────────────────
+// Returns array of "trip groups", each with one or two "leg groups"
+// leg group = { leg_label, origin, dest, options, dates: [route, route, route] }
+function buildTripGroups(routes) {
+  const byTrip = new Map();
+
+  for (const r of routes) {
+    const tid = r.trip_id ?? `solo_${r.id}`;
+    if (!byTrip.has(tid)) byTrip.set(tid, new Map());
+    const legMap = byTrip.get(tid);
+    const lk = r.leg_label;
+    if (!legMap.has(lk)) legMap.set(lk, []);
+    legMap.get(lk).push(r);
+  }
+
+  const tripGroups = [];
+  for (const [, legMap] of byTrip) {
+    const legs = [];
+    for (const [leg_label, dateRoutes] of legMap) {
+      dateRoutes.sort((a, b) => a.day_offset - b.day_offset);
+      const ref = dateRoutes[0];
+      legs.push({
+        leg_label,
+        origin: ref.origin,
+        destination: ref.destination,
+        seat_type: ref.seat_type,
+        non_stop_only: ref.non_stop_only,
+        airlines: ref.airlines,
+        adults: ref.adults,
+        dates: dateRoutes,
+        // all IDs in this leg group (for batch delete)
+        ids: dateRoutes.map(r => r.id),
+      });
+    }
+    // sort so outbound comes before return
+    legs.sort((a, b) => a.leg_label === 'outbound' ? -1 : 1);
+    tripGroups.push({ legs, isRoundTrip: legs.length > 1 });
+  }
+
+  return tripGroups;
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
 function renderRoutes(routes) {
   const grid = document.getElementById('routes-grid');
   const empty = document.getElementById('empty-state');
 
-  // Destroy existing mini charts
   Object.values(miniCharts).forEach(c => c.destroy());
   Object.keys(miniCharts).forEach(k => delete miniCharts[k]);
 
@@ -74,104 +112,111 @@ function renderRoutes(routes) {
   }
 
   empty.classList.add('d-none');
-
-  // Group by trip_id for visual grouping
-  const grouped = groupRoutes(routes);
-
   grid.innerHTML = '';
-  grouped.forEach(group => {
-    const wrapper = document.createElement('div');
-    wrapper.className = group.length > 1
-      ? 'col-12 col-md-6 col-xl-4'
-      : 'col-12 col-md-6 col-xl-4';
 
-    if (group.length > 1) {
-      const groupDiv = document.createElement('div');
-      groupDiv.className = 'trip-group d-flex flex-column gap-2';
-      group.forEach(r => groupDiv.appendChild(buildCard(r)));
-      wrapper.appendChild(groupDiv);
-    } else {
-      wrapper.appendChild(buildCard(group[0]));
-    }
+  const tripGroups = buildTripGroups(routes);
 
-    grid.appendChild(wrapper);
-  });
+  for (const group of tripGroups) {
+    const col = document.createElement('div');
+    col.className = 'col-12 col-xl-6';
+    col.appendChild(buildGroupCard(group));
+    grid.appendChild(col);
+  }
 
-  // Load charts after cards are in DOM
+  // Load mini charts after DOM is ready
   routes.forEach(r => loadMiniChart(r.id));
 }
 
-function groupRoutes(routes) {
-  const groups = {};
-  const standalone = [];
-  routes.forEach(r => {
-    if (r.trip_id) {
-      if (!groups[r.trip_id]) groups[r.trip_id] = [];
-      groups[r.trip_id].push(r);
-    } else {
-      standalone.push([r]);
+function buildGroupCard(group) {
+  const card = document.createElement('div');
+  card.className = `group-card p-3 ${group.isRoundTrip ? 'round-trip-group' : ''}`;
+
+  group.legs.forEach((leg, legIdx) => {
+    if (legIdx > 0) {
+      const divider = document.createElement('hr');
+      divider.className = 'border-secondary my-3';
+      card.appendChild(divider);
     }
+    card.appendChild(buildLegSection(leg, group.isRoundTrip));
   });
-  return [...Object.values(groups), ...standalone];
+
+  return card;
 }
 
-function buildCard(r) {
-  const priceHtml = formatPrice(r.current_price, r.prev_price);
-  const legBadge = r.trip_id
-    ? `<span class="badge badge-leg bg-secondary me-1">${r.leg_label}</span>`
+function buildLegSection(leg, isRoundTrip) {
+  const section = document.createElement('div');
+
+  const seatLabel = { ECONOMY: 'Economy', PREMIUM_ECONOMY: 'Prem. Eco', BUSINESS: 'Business', FIRST: 'First' }[leg.seat_type] || leg.seat_type;
+  const airlinesStr = leg.airlines?.length ? leg.airlines.join(', ') : 'Any airline';
+  const adults = leg.adults > 1 ? ` · ${leg.adults} adults` : '';
+  const nonstop = leg.non_stop_only ? ' · Non-stop' : '';
+  const legBadgeHtml = isRoundTrip
+    ? `<span class="badge bg-secondary me-2" style="font-size:0.65rem">${leg.leg_label.toUpperCase()}</span>`
     : '';
-  const nonstopBadge = r.non_stop_only
-    ? '<span class="badge bg-info text-dark small">Non-stop</span>'
-    : '';
-  const airlinesStr = r.airlines && r.airlines.length
-    ? r.airlines.join(', ')
-    : 'Any airline';
-  const seatLabel = {
-    ECONOMY: 'Economy', PREMIUM_ECONOMY: 'Prem. Economy',
-    BUSINESS: 'Business', FIRST: 'First'
-  }[r.seat_type] || r.seat_type;
 
-  const lastChecked = r.last_checked
-    ? `<span class="text-secondary small">Checked ${timeAgo(r.last_checked)}</span>`
-    : `<span class="text-secondary small">Never checked</span>`;
-
-  const adults = r.adults > 1 ? `· ${r.adults} adults` : '';
-
-  const card = document.createElement('div');
-  card.className = 'route-card p-3';
-  card.innerHTML = `
-    <div class="d-flex justify-content-between align-items-start mb-2">
+  section.innerHTML = `
+    <div class="d-flex justify-content-between align-items-start mb-3">
       <div>
-        ${legBadge}
-        <span class="route-label">${r.origin} → ${r.destination}</span>
-        <div class="text-secondary small mt-0">${r.departure_date}</div>
+        ${legBadgeHtml}
+        <span class="fw-bold fs-5">${leg.origin} → ${leg.destination}</span>
+        <div class="text-secondary small mt-1">${seatLabel}${adults}${nonstop} · ${airlinesStr}</div>
       </div>
-      <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="deleteRoute(${r.id})" title="Remove">
+      <button class="btn btn-sm btn-outline-danger py-0 px-1"
+              onclick="deleteLegGroup([${leg.ids.join(',')}])" title="Remove">
         <i class="bi bi-trash3 small"></i>
       </button>
     </div>
+    <div class="row g-2" id="dates-${leg.ids[0]}"></div>
+  `;
 
-    <div class="d-flex align-items-baseline gap-2 mb-1">
-      ${priceHtml}
+  const datesRow = section.querySelector(`#dates-${leg.ids[0]}`);
+  const colWidth = leg.dates.length === 3 ? 'col-4' : 'col-6';
+
+  leg.dates.forEach(r => {
+    const col = document.createElement('div');
+    col.className = colWidth;
+    col.appendChild(buildDateSubcard(r));
+    datesRow.appendChild(col);
+  });
+
+  return section;
+}
+
+function buildDateSubcard(r) {
+  const isTarget = r.day_offset === 0;
+  const offsetLabel = r.day_offset === -1 ? '← Day Before' : r.day_offset === 1 ? 'Day After →' : 'Selected';
+  const offsetClass = r.day_offset === -1 ? 'offset-badge-neg' : r.day_offset === 1 ? 'offset-badge-pos' : 'offset-badge-mid';
+  const isSelected = tripSelection.has(r.id);
+
+  const card = document.createElement('div');
+  card.className = `date-subcard p-2${isTarget ? ' is-target-date' : ''}${isSelected ? ' selected' : ''}`;
+  card.id = `subcard-${r.id}`;
+
+  const priceHtml = formatPrice(r.current_price, r.prev_price);
+  const lastChecked = r.last_checked ? timeAgo(r.last_checked) : 'never';
+
+  card.innerHTML = `
+    <input type="checkbox" class="route-checkbox" id="chk-${r.id}"
+           ${isSelected ? 'checked' : ''}
+           onchange="toggleTripSelection(${r.id}, '${r.origin}→${r.destination} ${r.departure_date}', event)">
+    <div class="text-center mb-1">
+      <span class="badge ${offsetClass} rounded-pill">${offsetLabel}</span>
     </div>
-    <div class="mb-2">${lastChecked}</div>
-
-    <div class="d-flex flex-wrap gap-1 mb-3">
-      <span class="badge bg-secondary">${seatLabel}${adults}</span>
-      <span class="badge bg-secondary">${airlinesStr}</span>
-      ${nonstopBadge}
-    </div>
-
-    <div class="chart-container" style="height:100px" onclick="openChartModal(${r.id}, '${r.origin} → ${r.destination} (${r.departure_date})')">
+    <div class="text-center small mb-1">${r.departure_date}</div>
+    <div class="text-center mb-1">${priceHtml}</div>
+    <div class="text-center text-secondary mb-2" style="font-size:0.65rem">checked ${lastChecked}</div>
+    <div class="chart-area" style="height:70px"
+         onclick="openChartModal(${r.id}, '${r.origin}→${r.destination} · ${r.departure_date}')">
       <canvas id="chart-${r.id}"></canvas>
     </div>
   `;
+
   return card;
 }
 
 function formatPrice(current, prev) {
   if (current == null) {
-    return `<span class="price-display price-none">—</span><span class="text-secondary small">No results</span>`;
+    return `<span class="price-none" style="font-size:1rem">—</span>`;
   }
   const fmt = n => `$${Math.round(n).toLocaleString()}`;
   let changeHtml = '';
@@ -179,7 +224,7 @@ function formatPrice(current, prev) {
     const diff = current - prev;
     const cls = diff < 0 ? 'price-down' : 'price-up';
     const icon = diff < 0 ? '↓' : '↑';
-    changeHtml = `<span class="${cls} small fw-semibold">${icon} ${fmt(Math.abs(diff))}</span>`;
+    changeHtml = `<span class="${cls}" style="font-size:0.7rem"> ${icon}${fmt(Math.abs(diff))}</span>`;
   }
   const mainCls = prev == null || prev === current ? '' : (current < prev ? 'price-down' : 'price-up');
   return `<span class="price-display ${mainCls}">${fmt(current)}</span>${changeHtml}`;
@@ -192,14 +237,12 @@ async function loadMiniChart(routeId) {
     const history = await res.json();
     renderMiniChart(routeId, history);
   } catch (e) {
-    console.error(`Failed to load history for route ${routeId}:`, e);
+    console.error(`Chart load failed for route ${routeId}:`, e);
   }
 }
 
 function buildChartData(history) {
-  return history
-    .filter(h => h.price != null)
-    .map(h => ({ x: new Date(h.checked_at), y: h.price }));
+  return history.filter(h => h.price != null).map(h => ({ x: new Date(h.checked_at), y: h.price }));
 }
 
 function renderMiniChart(routeId, history) {
@@ -211,11 +254,10 @@ function renderMiniChart(routeId, history) {
 
   if (!data.length) {
     const ctx = canvas.getContext('2d');
-    canvas.parentElement.style.height = '40px';
     ctx.fillStyle = '#6e7681';
-    ctx.font = '12px sans-serif';
+    ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('No price data yet', canvas.width / 2, 24);
+    ctx.fillText('No data yet', canvas.width / 2, 30);
     return;
   }
 
@@ -224,9 +266,8 @@ function renderMiniChart(routeId, history) {
 
 function chartConfig(data, mini = false) {
   const prices = data.map(d => d.y);
-  const minPrice = Math.min(...prices);
-  const maxPrice = Math.max(...prices);
-  const padding = Math.max((maxPrice - minPrice) * 0.2, 10);
+  const minP = Math.min(...prices), maxP = Math.max(...prices);
+  const pad = Math.max((maxP - minP) * 0.2, 10);
 
   return {
     type: 'line',
@@ -248,33 +289,20 @@ function chartConfig(data, mini = false) {
       animation: false,
       plugins: {
         legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: ctx => `$${Math.round(ctx.parsed.y).toLocaleString()}`
-          }
-        }
+        tooltip: { callbacks: { label: ctx => `$${Math.round(ctx.parsed.y).toLocaleString()}` } }
       },
       scales: {
         x: {
           type: 'time',
           time: { tooltipFormat: 'MMM d, h:mm a' },
           grid: { color: mini ? 'transparent' : '#21262d' },
-          ticks: {
-            display: !mini,
-            color: '#8b949e',
-            maxRotation: 0,
-            maxTicksLimit: 6,
-          }
+          ticks: { display: !mini, color: '#8b949e', maxRotation: 0, maxTicksLimit: 6 }
         },
         y: {
-          min: minPrice - padding,
-          max: maxPrice + padding,
+          min: minP - pad,
+          max: maxP + pad,
           grid: { color: mini ? 'transparent' : '#21262d' },
-          ticks: {
-            display: !mini,
-            color: '#8b949e',
-            callback: v => `$${Math.round(v).toLocaleString()}`,
-          }
+          ticks: { display: !mini, color: '#8b949e', callback: v => `$${Math.round(v).toLocaleString()}` }
         }
       }
     }
@@ -303,10 +331,105 @@ async function openChartModal(routeId, title) {
         ctx.textAlign = 'center';
         ctx.fillText('No price data yet', canvas.width / 2, 60);
       }
-    } catch (e) {
-      console.error('Chart modal error:', e);
-    }
+    } catch (e) { console.error('Chart modal error:', e); }
   }, { once: true });
+}
+
+// ── Trip Builder ───────────────────────────────────────────────────────────
+function toggleTripSelection(routeId, label, event) {
+  event.stopPropagation();
+  const route = routes.find(r => r.id === routeId);
+  const price = route?.current_price ?? null;
+
+  if (tripSelection.has(routeId)) {
+    tripSelection.delete(routeId);
+  } else {
+    tripSelection.set(routeId, { label, price });
+  }
+
+  const subcard = document.getElementById(`subcard-${routeId}`);
+  if (subcard) subcard.classList.toggle('selected', tripSelection.has(routeId));
+
+  renderTripBuilder();
+}
+
+function renderTripBuilder() {
+  const bar = document.getElementById('trip-builder');
+  const itemsEl = document.getElementById('trip-builder-items');
+  const totalEl = document.getElementById('trip-builder-total');
+  const countEl = document.getElementById('trip-builder-count');
+
+  if (tripSelection.size === 0) {
+    bar.classList.add('d-none');
+    return;
+  }
+
+  bar.classList.remove('d-none');
+
+  itemsEl.innerHTML = '';
+  let total = 0;
+  let hasNull = false;
+
+  for (const [id, { label, price }] of tripSelection) {
+    const span = document.createElement('span');
+    span.className = 'trip-item-badge';
+    span.innerHTML = `${label} ${price != null ? `<strong>$${Math.round(price).toLocaleString()}</strong>` : '<em class="text-secondary">no price</em>'}
+      <button class="btn-close ms-1" style="font-size:0.5rem" onclick="removeTripItem(${id})"></button>`;
+    itemsEl.appendChild(span);
+
+    if (price != null) total += price;
+    else hasNull = true;
+  }
+
+  countEl.textContent = `${tripSelection.size} flight${tripSelection.size > 1 ? 's' : ''} selected`;
+
+  if (hasNull) {
+    totalEl.innerHTML = `<span class="text-secondary">Total: n/a</span>`;
+  } else {
+    totalEl.innerHTML = `Total: <span class="text-success">$${Math.round(total).toLocaleString()}</span>`;
+  }
+}
+
+function removeTripItem(routeId) {
+  tripSelection.delete(routeId);
+  const chk = document.getElementById(`chk-${routeId}`);
+  if (chk) chk.checked = false;
+  const subcard = document.getElementById(`subcard-${routeId}`);
+  if (subcard) subcard.classList.remove('selected');
+  renderTripBuilder();
+}
+
+function clearTripBuilder() {
+  for (const id of tripSelection.keys()) {
+    const chk = document.getElementById(`chk-${id}`);
+    if (chk) chk.checked = false;
+    const subcard = document.getElementById(`subcard-${id}`);
+    if (subcard) subcard.classList.remove('selected');
+  }
+  tripSelection.clear();
+  renderTripBuilder();
+}
+
+// ── Delete ─────────────────────────────────────────────────────────────────
+async function deleteLegGroup(ids) {
+  if (!confirm(`Remove this route group (${ids.length} date variants) and all price history?`)) return;
+
+  // Remove from trip selection if present
+  ids.forEach(id => {
+    tripSelection.delete(id);
+  });
+  renderTripBuilder();
+
+  try {
+    await fetch('/api/routes/batch', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+    await loadRoutes();
+  } catch (e) {
+    alert('Failed to delete route group.');
+  }
 }
 
 // ── Add route ──────────────────────────────────────────────────────────────
@@ -339,23 +462,18 @@ async function addRoute() {
   const airlines = airlinesRaw ? airlinesRaw.split(',').map(a => a.trim().toUpperCase()).filter(Boolean) : [];
 
   if (!outOrigin || !outDest || !outDate) {
-    errEl.textContent = 'Origin, destination, and departure date are required.';
-    errEl.classList.remove('d-none');
+    showAddError('Origin, destination, and departure date are required.');
     return;
   }
   if (outOrigin.length !== 3 || outDest.length !== 3) {
-    errEl.textContent = 'Origin and destination must be 3-letter IATA airport codes (e.g. JFK, LHR).';
-    errEl.classList.remove('d-none');
+    showAddError('Origin and destination must be 3-letter IATA codes (e.g. JFK, LHR).');
     return;
   }
 
   const body = {
     trip_type: tripType,
     outbound: { origin: outOrigin, destination: outDest, departure_date: outDate },
-    adults,
-    seat_type: seatType,
-    non_stop_only: nonStop,
-    airlines,
+    adults, seat_type: seatType, non_stop_only: nonStop, airlines,
   };
 
   if (tripType === 'round_trip') {
@@ -363,8 +481,7 @@ async function addRoute() {
     const retDest = document.getElementById('ret-dest').value.trim().toUpperCase();
     const retDate = document.getElementById('ret-date').value;
     if (!retOrigin || !retDest || !retDate) {
-      errEl.textContent = 'Return origin, destination, and date are required for round trips.';
-      errEl.classList.remove('d-none');
+      showAddError('Return origin, destination, and date are required for round trips.');
       return;
     }
     body.return = { origin: retOrigin, destination: retDest, departure_date: retDate };
@@ -384,23 +501,17 @@ async function addRoute() {
     bootstrap.Modal.getInstance(document.getElementById('addModal')).hide();
     await loadRoutes();
   } catch (e) {
-    errEl.textContent = 'Failed to add route. Please try again.';
-    errEl.classList.remove('d-none');
+    showAddError('Failed to add route. Please try again.');
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<i class="bi bi-plus-lg me-1"></i>Add Route';
   }
 }
 
-// ── Delete route ───────────────────────────────────────────────────────────
-async function deleteRoute(id) {
-  if (!confirm('Remove this route and all its price history?')) return;
-  try {
-    await fetch(`/api/routes/${id}`, { method: 'DELETE' });
-    await loadRoutes();
-  } catch (e) {
-    alert('Failed to delete route.');
-  }
+function showAddError(msg) {
+  const el = document.getElementById('add-error');
+  el.textContent = msg;
+  el.classList.remove('d-none');
 }
 
 // ── Check now ──────────────────────────────────────────────────────────────
@@ -410,7 +521,6 @@ async function checkNow() {
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Checking…';
   try {
     await fetch('/api/poll', { method: 'POST' });
-    // Poll for updates — refresh a few times over 30 seconds
     let attempts = 0;
     const refresh = setInterval(async () => {
       await loadRoutes();
@@ -438,6 +548,7 @@ async function loadSettings() {
 }
 
 function openSettingsModal() {
+  document.getElementById('notify-result').classList.add('d-none');
   new bootstrap.Modal(document.getElementById('settingsModal')).show();
 }
 
@@ -452,6 +563,34 @@ async function saveSettings() {
     bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
   } catch (e) {
     alert('Failed to save settings.');
+  }
+}
+
+async function testNotification() {
+  const btn = document.getElementById('btn-test-notify');
+  const resultEl = document.getElementById('notify-result');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sending…';
+
+  try {
+    const res = await fetch('/api/notify/test', { method: 'POST' });
+    const data = await res.json();
+    resultEl.classList.remove('d-none', 'text-danger', 'text-success');
+    if (res.ok) {
+      resultEl.className = 'mt-2 small text-success';
+      resultEl.textContent = '✓ Test notification sent successfully.';
+    } else {
+      resultEl.className = 'mt-2 small text-danger';
+      resultEl.textContent = `✗ ${data.detail || 'Failed to send. Check PUSHOVER_TOKEN and PUSHOVER_USER.'}`;
+    }
+  } catch (e) {
+    resultEl.className = 'mt-2 small text-danger';
+    resultEl.textContent = '✗ Request failed.';
+    resultEl.classList.remove('d-none');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-bell me-1"></i>Send Test';
+    resultEl.classList.remove('d-none');
   }
 }
 
