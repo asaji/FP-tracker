@@ -4,6 +4,7 @@
 let routes = [];
 const miniCharts = {};
 let expandedChart = null;
+let showArchived = false;
 
 // trip builder: map of route_id -> {label, price}
 const tripSelection = new Map();
@@ -29,17 +30,19 @@ document.addEventListener('DOMContentLoaded', () => {
 function autoFillReturn() {
   if (document.getElementById('typeRoundTrip').checked) {
     document.getElementById('ret-origin').value = document.getElementById('out-dest').value;
-    document.getElementById('ret-dest').value = document.getElementById('out-origin').value;
+    document.getElementById('ret-dest').value   = document.getElementById('out-origin').value;
   }
 }
 
 // ── Load & render routes ───────────────────────────────────────────────────
 async function loadRoutes() {
   try {
-    const res = await fetch('/api/routes');
+    const url = showArchived ? '/api/routes?include_archived=1' : '/api/routes';
+    const res  = await fetch(url);
     routes = await res.json();
     renderRoutes(routes);
     updateLastChecked(routes);
+    updatePastAlert(routes);
   } catch (e) {
     console.error('Failed to load routes:', e);
   }
@@ -54,9 +57,59 @@ function updateLastChecked(routes) {
   }
 }
 
+function updatePastAlert(routes) {
+  const today = new Date().toISOString().slice(0, 10);
+  const pastActive = routes.filter(r => r.active !== 0 && r.departure_date < today);
+  const alertEl    = document.getElementById('past-alert');
+  const textEl     = document.getElementById('past-alert-text');
+  const toggleBtn  = document.getElementById('btn-show-archived');
+
+  if (pastActive.length > 0) {
+    const routeWord = pastActive.length === 1 ? 'route has' : 'routes have';
+    textEl.textContent = `${pastActive.length} tracked ${routeWord} passed their departure date.`;
+    alertEl.classList.remove('d-none');
+  } else {
+    alertEl.classList.add('d-none');
+  }
+
+  // Always update archived toggle label regardless
+  fetch('/api/routes/archived-count')
+    .then(r => r.json())
+    .then(data => {
+      if (data.count > 0) {
+        toggleBtn.textContent = showArchived
+          ? `Hide archived (${data.count})`
+          : `Show archived (${data.count})`;
+        toggleBtn.classList.remove('d-none');
+        if (!showArchived && pastActive.length === 0) {
+          alertEl.classList.remove('d-none');
+          textEl.textContent = '';
+        }
+      } else {
+        toggleBtn.classList.add('d-none');
+      }
+    })
+    .catch(() => {});
+}
+
+async function archivePast() {
+  try {
+    const res  = await fetch('/api/routes/archive-past', { method: 'POST' });
+    const data = await res.json();
+    if (data.archived > 0) {
+      await loadRoutes();
+    }
+  } catch (e) {
+    alert('Failed to archive past routes.');
+  }
+}
+
+function toggleArchived() {
+  showArchived = !showArchived;
+  loadRoutes();
+}
+
 // ── Grouping ───────────────────────────────────────────────────────────────
-// Returns array of "trip groups", each with one or two "leg groups"
-// leg group = { leg_label, origin, dest, options, dates: [route, route, route] }
 function buildTripGroups(routes) {
   const byTrip = new Map();
 
@@ -64,9 +117,8 @@ function buildTripGroups(routes) {
     const tid = r.trip_id ?? `solo_${r.id}`;
     if (!byTrip.has(tid)) byTrip.set(tid, new Map());
     const legMap = byTrip.get(tid);
-    const lk = r.leg_label;
-    if (!legMap.has(lk)) legMap.set(lk, []);
-    legMap.get(lk).push(r);
+    if (!legMap.has(r.leg_label)) legMap.set(r.leg_label, []);
+    legMap.get(r.leg_label).push(r);
   }
 
   const tripGroups = [];
@@ -77,18 +129,17 @@ function buildTripGroups(routes) {
       const ref = dateRoutes[0];
       legs.push({
         leg_label,
-        origin: ref.origin,
-        destination: ref.destination,
-        seat_type: ref.seat_type,
+        origin:       ref.origin,
+        destination:  ref.destination,
+        seat_type:    ref.seat_type,
         non_stop_only: ref.non_stop_only,
-        airlines: ref.airlines,
-        adults: ref.adults,
-        dates: dateRoutes,
-        // all IDs in this leg group (for batch delete)
-        ids: dateRoutes.map(r => r.id),
+        airlines:     ref.airlines,
+        adults:       ref.adults,
+        dates:        dateRoutes,
+        ids:          dateRoutes.map(r => r.id),
+        is_archived:  dateRoutes.every(r => r.active === 0),
       });
     }
-    // sort so outbound comes before return
     legs.sort((a, b) => a.leg_label === 'outbound' ? -1 : 1);
     tripGroups.push({ legs, isRoundTrip: legs.length > 1 });
   }
@@ -98,7 +149,7 @@ function buildTripGroups(routes) {
 
 // ── Render ─────────────────────────────────────────────────────────────────
 function renderRoutes(routes) {
-  const grid = document.getElementById('routes-grid');
+  const grid  = document.getElementById('routes-grid');
   const empty = document.getElementById('empty-state');
 
   Object.values(miniCharts).forEach(c => c.destroy());
@@ -114,28 +165,26 @@ function renderRoutes(routes) {
   empty.classList.add('d-none');
   grid.innerHTML = '';
 
-  const tripGroups = buildTripGroups(routes);
-
-  for (const group of tripGroups) {
+  for (const group of buildTripGroups(routes)) {
     const col = document.createElement('div');
     col.className = 'col-12 col-xl-6';
     col.appendChild(buildGroupCard(group));
     grid.appendChild(col);
   }
 
-  // Load mini charts after DOM is ready
   routes.forEach(r => loadMiniChart(r.id));
 }
 
 function buildGroupCard(group) {
+  const isArchived = group.legs.every(l => l.is_archived);
   const card = document.createElement('div');
-  card.className = `group-card p-3 ${group.isRoundTrip ? 'round-trip-group' : ''}`;
+  card.className = `group-card p-3 ${group.isRoundTrip ? 'round-trip-group' : ''} ${isArchived ? 'is-archived' : ''}`;
 
-  group.legs.forEach((leg, legIdx) => {
-    if (legIdx > 0) {
-      const divider = document.createElement('hr');
-      divider.className = 'border-secondary my-3';
-      card.appendChild(divider);
+  group.legs.forEach((leg, i) => {
+    if (i > 0) {
+      const hr = document.createElement('hr');
+      hr.className = 'border-secondary my-3';
+      card.appendChild(hr);
     }
     card.appendChild(buildLegSection(leg, group.isRoundTrip));
   });
@@ -144,20 +193,24 @@ function buildGroupCard(group) {
 }
 
 function buildLegSection(leg, isRoundTrip) {
-  const section = document.createElement('div');
-
-  const seatLabel = { ECONOMY: 'Economy', PREMIUM_ECONOMY: 'Prem. Eco', BUSINESS: 'Business', FIRST: 'First' }[leg.seat_type] || leg.seat_type;
+  const section    = document.createElement('div');
+  const seatLabel  = { ECONOMY: 'Economy', PREMIUM_ECONOMY: 'Prem. Eco', BUSINESS: 'Business', FIRST: 'First' }[leg.seat_type] || leg.seat_type;
   const airlinesStr = leg.airlines?.length ? leg.airlines.join(', ') : 'Any airline';
-  const adults = leg.adults > 1 ? ` · ${leg.adults} adults` : '';
-  const nonstop = leg.non_stop_only ? ' · Non-stop' : '';
-  const legBadgeHtml = isRoundTrip
+  const adults     = leg.adults > 1 ? ` · ${leg.adults} adults` : '';
+  const nonstop    = leg.non_stop_only ? ' · Non-stop' : '';
+  const legBadge   = isRoundTrip
     ? `<span class="badge bg-secondary me-2" style="font-size:0.65rem">${leg.leg_label.toUpperCase()}</span>`
     : '';
+
+  // Check if any date in this leg is past departure
+  const today    = new Date().toISOString().slice(0, 10);
+  const isPast   = leg.dates.every(r => r.departure_date < today);
+  const pastBadge = isPast ? `<span class="past-badge me-2">PAST</span>` : '';
 
   section.innerHTML = `
     <div class="d-flex justify-content-between align-items-start mb-3">
       <div>
-        ${legBadgeHtml}
+        ${pastBadge}${legBadge}
         <span class="fw-bold fs-5">${leg.origin} → ${leg.destination}</span>
         <div class="text-secondary small mt-1">${seatLabel}${adults}${nonstop} · ${airlinesStr}</div>
       </div>
@@ -171,7 +224,6 @@ function buildLegSection(leg, isRoundTrip) {
 
   const datesRow = section.querySelector(`#dates-${leg.ids[0]}`);
   const colWidth = leg.dates.length === 3 ? 'col-4' : 'col-6';
-
   leg.dates.forEach(r => {
     const col = document.createElement('div');
     col.className = colWidth;
@@ -183,16 +235,18 @@ function buildLegSection(leg, isRoundTrip) {
 }
 
 function buildDateSubcard(r) {
-  const isTarget = r.day_offset === 0;
+  const isTarget   = r.day_offset === 0;
   const offsetLabel = r.day_offset === -1 ? '← Day Before' : r.day_offset === 1 ? 'Day After →' : 'Selected';
   const offsetClass = r.day_offset === -1 ? 'offset-badge-neg' : r.day_offset === 1 ? 'offset-badge-pos' : 'offset-badge-mid';
-  const isSelected = tripSelection.has(r.id);
+  const isSelected  = tripSelection.has(r.id);
 
   const card = document.createElement('div');
   card.className = `date-subcard p-2${isTarget ? ' is-target-date' : ''}${isSelected ? ' selected' : ''}`;
   card.id = `subcard-${r.id}`;
 
-  const priceHtml = formatPrice(r.current_price, r.prev_price);
+  const priceHtml   = formatPrice(r.current_price, r.prev_price);
+  const trendHtml   = renderTrend(r.trend);
+  const statsHtml   = renderStats(r.price_min, r.price_avg, r.price_max, r.price_count);
   const lastChecked = r.last_checked ? timeAgo(r.last_checked) : 'never';
 
   card.innerHTML = `
@@ -203,7 +257,9 @@ function buildDateSubcard(r) {
       <span class="badge ${offsetClass} rounded-pill">${offsetLabel}</span>
     </div>
     <div class="text-center small mb-1">${r.departure_date}</div>
-    <div class="text-center mb-1">${priceHtml}</div>
+    <div class="text-center mb-0">${priceHtml}</div>
+    <div class="text-center mb-1">${trendHtml}</div>
+    <div class="text-center mb-2">${statsHtml}</div>
     <div class="text-center text-secondary mb-2" style="font-size:0.65rem">checked ${lastChecked}</div>
     <div class="chart-area" style="height:70px"
          onclick="openChartModal(${r.id}, '${r.origin}→${r.destination} · ${r.departure_date}')">
@@ -214,15 +270,35 @@ function buildDateSubcard(r) {
   return card;
 }
 
+function renderTrend(trend) {
+  if (!trend || trend === 'unknown') return '';
+  const map = {
+    rising:  `<span class="trend-rising">▲ Rising</span>`,
+    falling: `<span class="trend-falling">▼ Falling</span>`,
+    stable:  `<span class="trend-stable">→ Stable</span>`,
+  };
+  return map[trend] || '';
+}
+
+function renderStats(min, avg, max, count) {
+  if (!count || count < 2) return `<span class="price-stats">No history yet</span>`;
+  const fmt = n => n != null ? `$${Math.round(n).toLocaleString()}` : '—';
+  return `<span class="price-stats">
+    <span class="stat-low" title="All-time low">↓${fmt(min)}</span>
+    <span class="mx-1 text-secondary">·</span>
+    <span title="Average">avg ${fmt(avg)}</span>
+    <span class="mx-1 text-secondary">·</span>
+    <span class="stat-high" title="All-time high">↑${fmt(max)}</span>
+  </span>`;
+}
+
 function formatPrice(current, prev) {
-  if (current == null) {
-    return `<span class="price-none" style="font-size:1rem">—</span>`;
-  }
+  if (current == null) return `<span class="price-none" style="font-size:1rem">—</span>`;
   const fmt = n => `$${Math.round(n).toLocaleString()}`;
   let changeHtml = '';
   if (prev != null && prev !== current) {
     const diff = current - prev;
-    const cls = diff < 0 ? 'price-down' : 'price-up';
+    const cls  = diff < 0 ? 'price-down' : 'price-up';
     const icon = diff < 0 ? '↓' : '↑';
     changeHtml = `<span class="${cls}" style="font-size:0.7rem"> ${icon}${fmt(Math.abs(diff))}</span>`;
   }
@@ -233,7 +309,7 @@ function formatPrice(current, prev) {
 // ── Mini charts ────────────────────────────────────────────────────────────
 async function loadMiniChart(routeId) {
   try {
-    const res = await fetch(`/api/routes/${routeId}/history`);
+    const res     = await fetch(`/api/routes/${routeId}/history`);
     const history = await res.json();
     renderMiniChart(routeId, history);
   } catch (e) {
@@ -251,7 +327,6 @@ function renderMiniChart(routeId, history) {
   if (miniCharts[routeId]) miniCharts[routeId].destroy();
 
   const data = buildChartData(history);
-
   if (!data.length) {
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#6e7681';
@@ -267,7 +342,7 @@ function renderMiniChart(routeId, history) {
 function chartConfig(data, mini = false) {
   const prices = data.map(d => d.y);
   const minP = Math.min(...prices), maxP = Math.max(...prices);
-  const pad = Math.max((maxP - minP) * 0.2, 10);
+  const pad  = Math.max((maxP - minP) * 0.2, 10);
 
   return {
     type: 'line',
@@ -318,10 +393,10 @@ async function openChartModal(routeId, title) {
   document.getElementById('chartModal').addEventListener('shown.bs.modal', async () => {
     if (expandedChart) { expandedChart.destroy(); expandedChart = null; }
     try {
-      const res = await fetch(`/api/routes/${routeId}/history`);
+      const res     = await fetch(`/api/routes/${routeId}/history`);
       const history = await res.json();
-      const data = buildChartData(history);
-      const canvas = document.getElementById('chart-modal-canvas');
+      const data    = buildChartData(history);
+      const canvas  = document.getElementById('chart-modal-canvas');
       if (data.length) {
         expandedChart = new Chart(canvas, chartConfig(data, false));
       } else {
@@ -354,48 +429,41 @@ function toggleTripSelection(routeId, label, event) {
 }
 
 function renderTripBuilder() {
-  const bar = document.getElementById('trip-builder');
-  const itemsEl = document.getElementById('trip-builder-items');
-  const totalEl = document.getElementById('trip-builder-total');
-  const countEl = document.getElementById('trip-builder-count');
+  const bar      = document.getElementById('trip-builder');
+  const itemsEl  = document.getElementById('trip-builder-items');
+  const totalEl  = document.getElementById('trip-builder-total');
+  const countEl  = document.getElementById('trip-builder-count');
 
-  if (tripSelection.size === 0) {
-    bar.classList.add('d-none');
-    return;
-  }
+  if (tripSelection.size === 0) { bar.classList.add('d-none'); return; }
 
   bar.classList.remove('d-none');
-
   itemsEl.innerHTML = '';
-  let total = 0;
-  let hasNull = false;
+  let total = 0, hasNull = false;
 
   for (const [id, { label, price }] of tripSelection) {
     const span = document.createElement('span');
     span.className = 'trip-item-badge';
-    span.innerHTML = `${label} ${price != null ? `<strong>$${Math.round(price).toLocaleString()}</strong>` : '<em class="text-secondary">no price</em>'}
+    span.innerHTML = `${label} ${price != null
+      ? `<strong>$${Math.round(price).toLocaleString()}</strong>`
+      : '<em class="text-secondary">no price</em>'}
       <button class="btn-close ms-1" style="font-size:0.5rem" onclick="removeTripItem(${id})"></button>`;
     itemsEl.appendChild(span);
-
     if (price != null) total += price;
     else hasNull = true;
   }
 
   countEl.textContent = `${tripSelection.size} flight${tripSelection.size > 1 ? 's' : ''} selected`;
-
-  if (hasNull) {
-    totalEl.innerHTML = `<span class="text-secondary">Total: n/a</span>`;
-  } else {
-    totalEl.innerHTML = `Total: <span class="text-success">$${Math.round(total).toLocaleString()}</span>`;
-  }
+  totalEl.innerHTML = hasNull
+    ? `<span class="text-secondary">Total: n/a</span>`
+    : `Total: <span class="text-success">$${Math.round(total).toLocaleString()}</span>`;
 }
 
 function removeTripItem(routeId) {
   tripSelection.delete(routeId);
   const chk = document.getElementById(`chk-${routeId}`);
   if (chk) chk.checked = false;
-  const subcard = document.getElementById(`subcard-${routeId}`);
-  if (subcard) subcard.classList.remove('selected');
+  const sub = document.getElementById(`subcard-${routeId}`);
+  if (sub) sub.classList.remove('selected');
   renderTripBuilder();
 }
 
@@ -403,8 +471,8 @@ function clearTripBuilder() {
   for (const id of tripSelection.keys()) {
     const chk = document.getElementById(`chk-${id}`);
     if (chk) chk.checked = false;
-    const subcard = document.getElementById(`subcard-${id}`);
-    if (subcard) subcard.classList.remove('selected');
+    const sub = document.getElementById(`subcard-${id}`);
+    if (sub) sub.classList.remove('selected');
   }
   tripSelection.clear();
   renderTripBuilder();
@@ -413,13 +481,8 @@ function clearTripBuilder() {
 // ── Delete ─────────────────────────────────────────────────────────────────
 async function deleteLegGroup(ids) {
   if (!confirm(`Remove this route group (${ids.length} date variants) and all price history?`)) return;
-
-  // Remove from trip selection if present
-  ids.forEach(id => {
-    tripSelection.delete(id);
-  });
+  ids.forEach(id => tripSelection.delete(id));
   renderTripBuilder();
-
   try {
     await fetch('/api/routes/batch', {
       method: 'DELETE',
@@ -442,33 +505,27 @@ function openAddModal() {
     document.getElementById(id).value = '';
   });
   document.getElementById('opt-adults').value = 1;
-  document.getElementById('opt-seat').value = 'ECONOMY';
+  document.getElementById('opt-seat').value   = 'ECONOMY';
   document.getElementById('opt-nonstop').checked = false;
   new bootstrap.Modal(document.getElementById('addModal')).show();
 }
 
 async function addRoute() {
-  const errEl = document.getElementById('add-error');
+  const errEl    = document.getElementById('add-error');
   errEl.classList.add('d-none');
 
   const tripType = document.querySelector('input[name="tripType"]:checked').value;
   const outOrigin = document.getElementById('out-origin').value.trim().toUpperCase();
-  const outDest = document.getElementById('out-dest').value.trim().toUpperCase();
-  const outDate = document.getElementById('out-date').value;
-  const adults = parseInt(document.getElementById('opt-adults').value) || 1;
-  const seatType = document.getElementById('opt-seat').value;
-  const nonStop = document.getElementById('opt-nonstop').checked;
+  const outDest   = document.getElementById('out-dest').value.trim().toUpperCase();
+  const outDate   = document.getElementById('out-date').value;
+  const adults    = parseInt(document.getElementById('opt-adults').value) || 1;
+  const seatType  = document.getElementById('opt-seat').value;
+  const nonStop   = document.getElementById('opt-nonstop').checked;
   const airlinesRaw = document.getElementById('opt-airlines').value;
-  const airlines = airlinesRaw ? airlinesRaw.split(',').map(a => a.trim().toUpperCase()).filter(Boolean) : [];
+  const airlines  = airlinesRaw ? airlinesRaw.split(',').map(a => a.trim().toUpperCase()).filter(Boolean) : [];
 
-  if (!outOrigin || !outDest || !outDate) {
-    showAddError('Origin, destination, and departure date are required.');
-    return;
-  }
-  if (outOrigin.length !== 3 || outDest.length !== 3) {
-    showAddError('Origin and destination must be 3-letter IATA codes (e.g. JFK, LHR).');
-    return;
-  }
+  if (!outOrigin || !outDest || !outDate) { showAddError('Origin, destination, and departure date are required.'); return; }
+  if (outOrigin.length !== 3 || outDest.length !== 3) { showAddError('Origin and destination must be 3-letter IATA codes (e.g. JFK, LHR).'); return; }
 
   const body = {
     trip_type: tripType,
@@ -478,12 +535,9 @@ async function addRoute() {
 
   if (tripType === 'round_trip') {
     const retOrigin = document.getElementById('ret-origin').value.trim().toUpperCase();
-    const retDest = document.getElementById('ret-dest').value.trim().toUpperCase();
-    const retDate = document.getElementById('ret-date').value;
-    if (!retOrigin || !retDest || !retDate) {
-      showAddError('Return origin, destination, and date are required for round trips.');
-      return;
-    }
+    const retDest   = document.getElementById('ret-dest').value.trim().toUpperCase();
+    const retDate   = document.getElementById('ret-date').value;
+    if (!retOrigin || !retDest || !retDate) { showAddError('Return origin, destination, and date are required for round trips.'); return; }
     body.return = { origin: retOrigin, destination: retDest, departure_date: retDate };
   }
 
@@ -539,7 +593,7 @@ async function checkNow() {
 // ── Settings ───────────────────────────────────────────────────────────────
 async function loadSettings() {
   try {
-    const res = await fetch('/api/settings');
+    const res  = await fetch('/api/settings');
     const data = await res.json();
     document.getElementById('setting-interval').value = data.poll_interval_minutes;
   } catch (e) {
@@ -567,28 +621,27 @@ async function saveSettings() {
 }
 
 async function testNotification() {
-  const btn = document.getElementById('btn-test-notify');
+  const btn      = document.getElementById('btn-test-notify');
   const resultEl = document.getElementById('notify-result');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sending…';
+  btn.disabled   = true;
+  btn.innerHTML  = '<span class="spinner-border spinner-border-sm me-1"></span>Sending…';
 
   try {
-    const res = await fetch('/api/notify/test', { method: 'POST' });
+    const res  = await fetch('/api/notify/test', { method: 'POST' });
     const data = await res.json();
     resultEl.classList.remove('d-none', 'text-danger', 'text-success');
     if (res.ok) {
-      resultEl.className = 'mt-2 small text-success';
+      resultEl.className  = 'mt-2 small text-success';
       resultEl.textContent = '✓ Test notification sent successfully.';
     } else {
-      resultEl.className = 'mt-2 small text-danger';
-      resultEl.textContent = `✗ ${data.detail || 'Failed to send. Check PUSHOVER_TOKEN and PUSHOVER_USER.'}`;
+      resultEl.className  = 'mt-2 small text-danger';
+      resultEl.textContent = `✗ ${data.detail || 'Failed. Check PUSHOVER_TOKEN and PUSHOVER_USER.'}`;
     }
   } catch (e) {
-    resultEl.className = 'mt-2 small text-danger';
+    resultEl.className  = 'mt-2 small text-danger';
     resultEl.textContent = '✗ Request failed.';
-    resultEl.classList.remove('d-none');
   } finally {
-    btn.disabled = false;
+    btn.disabled  = false;
     btn.innerHTML = '<i class="bi bi-bell me-1"></i>Send Test';
     resultEl.classList.remove('d-none');
   }
@@ -597,8 +650,8 @@ async function testNotification() {
 // ── Utilities ──────────────────────────────────────────────────────────────
 function timeAgo(isoStr) {
   const diff = Math.floor((Date.now() - new Date(isoStr)) / 1000);
-  if (diff < 60) return 'just now';
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 60)    return 'just now';
+  if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return `${Math.floor(diff / 86400)}d ago`;
 }

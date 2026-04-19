@@ -131,3 +131,29 @@ body {
 .offset-badge-neg { background: #21262d; color: #8b949e; font-size: 0.65rem; }
 .offset-badge-mid { background: #1f3a5f; color: #58a6ff; font-size: 0.65rem; }
 .offset-badge-pos { background: #21262d; color: #8b949e; font-size: 0.65rem; }
+
+/* ── Trend indicators ────────────────────────────────────────────────── */
+.trend-rising  { color: #f85149; font-size: 0.7rem; }
+.trend-falling { color: #3fb950; font-size: 0.7rem; }
+.trend-stable  { color: #8b949e; font-size: 0.7rem; }
+
+/* ── Price stats row ─────────────────────────────────────────────────── */
+.price-stats { font-size: 0.65rem; color: #6e7681; }
+.price-stats .stat-low  { color: #3fb950; }
+.price-stats .stat-high { color: #f85149; }
+
+/* ── Archived / past routes ──────────────────────────────────────────── */
+.group-card.is-archived {
+  opacity: 0.45;
+  filter: grayscale(40%);
+}
+
+.past-badge {
+  font-size: 0.6rem;
+  letter-spacing: 0.5px;
+  background: #3d1a00;
+  color: #f0883e;
+  border: 1px solid #5a2d00;
+  border-radius: 3px;
+  padding: 1px 5px;
+}

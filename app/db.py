@@ -49,10 +49,13 @@ def init_db(db_path: str):
 
 def _migrate(db_path: str):
     with _connect(db_path) as conn:
-        try:
-            conn.execute("ALTER TABLE routes ADD COLUMN day_offset INTEGER NOT NULL DEFAULT 0")
-        except Exception:
-            pass  # column already exists
+        for stmt in [
+            "ALTER TABLE routes ADD COLUMN day_offset INTEGER NOT NULL DEFAULT 0",
+        ]:
+            try:
+                conn.execute(stmt)
+            except Exception:
+                pass
 
 
 def _now() -> str:
@@ -69,12 +72,29 @@ def get_active_routes(db_path: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_all_routes(db_path: str) -> list[dict]:
+def get_all_routes(db_path: str, include_archived: bool = False) -> list[dict]:
+    where = "" if include_archived else "WHERE active = 1"
     with _connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT * FROM routes ORDER BY trip_id, leg_label, id"
+            f"SELECT * FROM routes {where} ORDER BY trip_id, leg_label, id"
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def archive_past_routes(db_path: str) -> int:
+    today = datetime.now().strftime('%Y-%m-%d')
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            "UPDATE routes SET active = 0 WHERE departure_date < ? AND active = 1",
+            (today,)
+        )
+    return cur.rowcount
+
+
+def count_archived_routes(db_path: str) -> int:
+    with _connect(db_path) as conn:
+        row = conn.execute("SELECT COUNT(*) FROM routes WHERE active = 0").fetchone()
+    return row[0]
 
 
 def add_route(db_path: str, trip_id: int | None, leg_label: str, origin: str,
@@ -183,6 +203,68 @@ def get_previous_price_for_routes(db_path: str, route_ids: list[int]) -> dict[in
             ).fetchall()
             result[rid] = rows[1]['price'] if len(rows) >= 2 else None
     return result
+
+
+def get_price_stats_for_routes(db_path: str, route_ids: list[int]) -> dict[int, dict]:
+    if not route_ids:
+        return {}
+    placeholders = ','.join('?' * len(route_ids))
+    with _connect(db_path) as conn:
+        stats_rows = conn.execute(
+            f"""SELECT route_id,
+                       MIN(price)          AS price_min,
+                       MAX(price)          AS price_max,
+                       ROUND(AVG(price),0) AS price_avg,
+                       COUNT(price)        AS price_count
+                FROM price_history
+                WHERE route_id IN ({placeholders}) AND price IS NOT NULL
+                GROUP BY route_id""",
+            route_ids,
+        ).fetchall()
+
+        recent_rows = conn.execute(
+            f"""SELECT route_id, price
+                FROM price_history
+                WHERE route_id IN ({placeholders}) AND price IS NOT NULL
+                ORDER BY route_id, checked_at DESC""",
+            route_ids,
+        ).fetchall()
+
+    stats = {r['route_id']: dict(r) for r in stats_rows}
+
+    recent: dict[int, list[float]] = {}
+    for row in recent_rows:
+        rid = row['route_id']
+        if rid not in recent:
+            recent[rid] = []
+        if len(recent[rid]) < 5:
+            recent[rid].append(row['price'])
+
+    result = {}
+    for rid in route_ids:
+        s = stats.get(rid, {})
+        result[rid] = {
+            'price_min':   s.get('price_min'),
+            'price_max':   s.get('price_max'),
+            'price_avg':   s.get('price_avg'),
+            'price_count': s.get('price_count', 0),
+            'trend':       _compute_trend(recent.get(rid, [])),
+        }
+    return result
+
+
+def _compute_trend(prices: list[float]) -> str:
+    if len(prices) < 3:
+        return 'unknown'
+    newest, oldest = prices[0], prices[-1]
+    if oldest == 0:
+        return 'unknown'
+    pct = (newest - oldest) / oldest * 100
+    if pct > 2:
+        return 'rising'
+    if pct < -2:
+        return 'falling'
+    return 'stable'
 
 
 # ── Settings ───────────────────────────────────────────────────────────────

@@ -4,14 +4,18 @@ from datetime import datetime, timedelta
 from flask import Blueprint, current_app, jsonify, render_template, request
 
 from .db import (
-    add_route, delete_route, delete_routes_batch, get_all_routes,
+    add_route, archive_past_routes, count_archived_routes,
+    delete_route, delete_routes_batch, get_all_routes,
     get_latest_price_for_routes, get_previous_price_for_routes,
-    get_price_history, get_setting, next_trip_id, set_setting,
+    get_price_history, get_price_stats_for_routes,
+    get_setting, next_trip_id, set_setting,
 )
 from .pushover import send_pushover
 from .scheduler import check_all_routes, reschedule
 
 bp = Blueprint('api', __name__)
+
+_TODAY = lambda: datetime.now().strftime('%Y-%m-%d')
 
 
 def _db():
@@ -37,26 +41,36 @@ def index():
 
 @bp.route('/api/routes', methods=['GET'])
 def list_routes():
-    routes = get_all_routes(_db())
+    include_archived = request.args.get('include_archived', '0') == '1'
+    routes = get_all_routes(_db(), include_archived=include_archived)
     ids = [r['id'] for r in routes]
     latest = get_latest_price_for_routes(_db(), ids)
-    prev = get_previous_price_for_routes(_db(), ids)
+    prev   = get_previous_price_for_routes(_db(), ids)
+    stats  = get_price_stats_for_routes(_db(), ids)
+    today  = _TODAY()
 
     result = []
     for r in routes:
         rid = r['id']
-        lp = latest.get(rid)
+        lp  = latest.get(rid)
         entry = dict(r)
         entry['airlines'] = json.loads(r['airlines']) if r['airlines'] else []
+        entry['is_past']  = r['departure_date'] < today
         if lp:
-            entry['current_price'] = lp['price']
-            entry['last_checked'] = lp['checked_at']
+            entry['current_price']  = lp['price']
+            entry['last_checked']   = lp['checked_at']
             entry['flight_details'] = json.loads(lp['flight_details']) if lp['flight_details'] else None
         else:
-            entry['current_price'] = None
-            entry['last_checked'] = None
+            entry['current_price']  = None
+            entry['last_checked']   = None
             entry['flight_details'] = None
         entry['prev_price'] = prev.get(rid)
+        s = stats.get(rid, {})
+        entry['price_min']   = s.get('price_min')
+        entry['price_max']   = s.get('price_max')
+        entry['price_avg']   = s.get('price_avg')
+        entry['price_count'] = s.get('price_count', 0)
+        entry['trend']       = s.get('trend', 'unknown')
         result.append(entry)
 
     return jsonify(result)
@@ -66,10 +80,10 @@ def list_routes():
 def create_routes():
     data = request.get_json(force=True)
     trip_type = data.get('trip_type', 'one_way')
-    adults = int(data.get('adults', 1))
+    adults    = int(data.get('adults', 1))
     seat_type = data.get('seat_type', 'ECONOMY').upper()
-    non_stop = bool(data.get('non_stop_only', False))
-    airlines = [a.strip().upper() for a in data.get('airlines', []) if a.strip()] or None
+    non_stop  = bool(data.get('non_stop_only', False))
+    airlines  = [a.strip().upper() for a in data.get('airlines', []) if a.strip()] or None
 
     created = []
     tid = next_trip_id(_db())
@@ -102,6 +116,17 @@ def remove_routes_batch():
     ids = [int(i) for i in data.get('ids', [])]
     delete_routes_batch(_db(), ids)
     return jsonify({'deleted': ids})
+
+
+@bp.route('/api/routes/archive-past', methods=['POST'])
+def archive_past():
+    count = archive_past_routes(_db())
+    return jsonify({'archived': count})
+
+
+@bp.route('/api/routes/archived-count', methods=['GET'])
+def archived_count():
+    return jsonify({'count': count_archived_routes(_db())})
 
 
 # ── Price history ──────────────────────────────────────────────────────────
