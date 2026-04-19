@@ -1,0 +1,15 @@
+services:
+  fp-tracker:
+    build: .
+    container_name: fp-tracker
+    ports:
+      - "7002:7002"
+    volumes:
+      - ./data:/config
+    environment:
+      - TZ=America/Los_Angeles
+      - DB_PATH=/config/flights.db
+      - PUSHOVER_TOKEN=
+      - PUSHOVER_USER=
+      - POLL_INTERVAL_MINUTES=480
+    restart: unless-stopped

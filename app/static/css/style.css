@@ -1,0 +1,114 @@
+body {
+  background-color: #0d1117;
+  min-height: 100vh;
+}
+
+.route-card {
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #161b22;
+  transition: border-color 0.15s;
+}
+
+.route-card:hover {
+  border-color: #58a6ff;
+}
+
+.price-up {
+  color: #f85149;
+}
+
+.price-down {
+  color: #3fb950;
+}
+
+.price-same {
+  color: #8b949e;
+}
+
+.price-none {
+  color: #6e7681;
+}
+
+.price-display {
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+.route-label {
+  font-size: 1.1rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.badge-leg {
+  font-size: 0.65rem;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.chart-container {
+  position: relative;
+  cursor: pointer;
+}
+
+.chart-container:hover::after {
+  content: 'Click to expand';
+  position: absolute;
+  bottom: 4px;
+  right: 8px;
+  font-size: 0.65rem;
+  color: #8b949e;
+}
+
+.trip-group {
+  border-left: 3px solid #1f6feb;
+  padding-left: 6px;
+}
+
+canvas {
+  display: block;
+}
+
+.btn-close {
+  filter: invert(1) grayscale(100%) brightness(200%);
+}
+
+.form-control, .form-select {
+  background-color: #0d1117;
+  border-color: #30363d;
+  color: #e6edf3;
+}
+
+.form-control:focus, .form-select:focus {
+  background-color: #0d1117;
+  border-color: #58a6ff;
+  color: #e6edf3;
+  box-shadow: 0 0 0 0.2rem rgba(88, 166, 255, 0.15);
+}
+
+.form-control::placeholder {
+  color: #6e7681;
+}
+
+.card.bg-dark {
+  background-color: #0d1117 !important;
+}
+
+.modal-content {
+  background-color: #161b22;
+}
+
+.modal-header, .modal-footer {
+  border-color: #30363d !important;
+}
+
+.navbar {
+  background-color: #010409 !important;
+}
+
+.spinner-border-sm {
+  width: 1rem;
+  height: 1rem;
+}
