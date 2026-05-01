@@ -42,7 +42,8 @@ def reschedule(db_path: str, interval_minutes: int):
 
 
 def check_all_routes(db_path: str):
-    from .db import get_active_routes, save_price_history, get_last_price
+    from .db import (get_active_routes, get_best_combo, get_named_trips,
+                     get_last_price, save_price_history, update_trip_last_combo)
     from .search import search_route
     from .pushover import send_pushover
 
@@ -75,7 +76,7 @@ def check_all_routes(db_path: str):
                 })
                 save_price_history(db_path, route['id'], price, 'USD', details)
 
-                if last_price is not None and price != last_price:
+                if last_price is not None and price != last_price and route['day_offset'] == 0:
                     diff = price - last_price
                     airlines_str = ', '.join(airlines) if airlines else 'any airline'
                     direction = 'dropped' if diff < 0 else 'increased'
@@ -92,3 +93,37 @@ def check_all_routes(db_path: str):
 
         except Exception:
             logger.exception("Error checking route id=%s", route['id'])
+
+    # ── Budget alerts ─────────────────────────────────────────────────────
+    try:
+        trips = get_named_trips(db_path)
+        for trip in trips:
+            if not trip.get('budget'):
+                continue
+            combo = get_best_combo(db_path, trip['id'])
+            if not combo['has_prices']:
+                continue
+
+            current_total = combo['total']
+            last_total = trip.get('last_combo')
+            budget = trip['budget']
+
+            if current_total <= budget:
+                prev_was_over = last_total is None or last_total > budget
+                price_dropped = last_total is not None and current_total < last_total - 0.99
+                if prev_was_over or price_dropped:
+                    savings = budget - current_total
+                    legs_str = '  +  '.join(
+                        f"{l['origin']}→{l['destination']} {l['departure_date']} ${l['price']:.0f}"
+                        for l in combo['legs']
+                    )
+                    msg = (
+                        f"✓ Under budget by ${savings:.0f}\n"
+                        f"{legs_str}\n"
+                        f"Total: ${current_total:.0f}  /  Budget: ${budget:.0f}"
+                    )
+                    send_pushover(msg, title=f"🎯 {trip['name']} — Budget Hit")
+
+            update_trip_last_combo(db_path, trip['id'], current_total)
+    except Exception:
+        logger.exception("Error in budget alert check")

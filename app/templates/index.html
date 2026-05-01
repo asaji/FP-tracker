@@ -1,9 +1,12 @@
 <!doctype html>
-<html lang="en" data-bs-theme="dark">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Flight Price Tracker</title>
+  <title>FP Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Barlow+Condensed:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <link href="/static/css/style.css" rel="stylesheet">
@@ -11,58 +14,88 @@
 <body>
 
 <!-- Navbar -->
-<nav class="navbar navbar-dark bg-dark border-bottom border-secondary sticky-top">
-  <div class="container-fluid px-3">
-    <span class="navbar-brand fw-bold"><i class="bi bi-airplane-fill me-2 text-primary"></i>Flight Price Tracker</span>
-    <div class="d-flex gap-2 align-items-center">
-      <span id="last-checked-text" class="text-secondary small d-none d-md-inline"></span>
-      <button class="btn btn-sm btn-outline-secondary" id="btn-check-now" onclick="checkNow()">
-        <i class="bi bi-arrow-clockwise me-1"></i>Check Now
-      </button>
-      <button class="btn btn-sm btn-primary" onclick="openAddModal()">
-        <i class="bi bi-plus-lg me-1"></i>Add Route
-      </button>
-      <button class="btn btn-sm btn-outline-secondary" onclick="openSettingsModal()" title="Settings">
-        <i class="bi bi-gear"></i>
-      </button>
-    </div>
+<nav class="fp-navbar">
+  <div class="fp-brand">
+    <i class="bi bi-airplane-fill fp-brand-icon"></i>
+    <span class="fp-brand-text">FP<em>TRACKER</em></span>
+  </div>
+  <div class="fp-nav-actions">
+    <span id="last-checked-text" class="fp-last-checked d-none d-md-inline"></span>
+    <button class="btn-fp-ghost" id="btn-check-now" onclick="checkNow()">
+      <i class="bi bi-arrow-clockwise"></i><span class="d-none d-sm-inline ms-1">Refresh</span>
+    </button>
+    <button class="btn-fp-primary" onclick="openAddModal()">
+      <i class="bi bi-plus-lg"></i><span class="d-none d-sm-inline ms-1">Add Route</span>
+    </button>
+    <button class="btn-fp-icon" onclick="openSettingsModal()" title="Settings">
+      <i class="bi bi-sliders"></i>
+    </button>
   </div>
 </nav>
 
 <!-- Past routes alert bar -->
-<div id="past-alert" class="d-none border-bottom border-warning" style="background:#1a1600">
+<div id="past-alert" class="fp-alert-bar d-none">
   <div class="container-fluid px-3 py-2 d-flex align-items-center gap-3 flex-wrap">
-    <span class="text-warning small"><i class="bi bi-clock-history me-1"></i>
-      <span id="past-alert-text"></span>
-    </span>
-    <button class="btn btn-sm btn-outline-warning py-0" onclick="archivePast()">Archive Past Routes</button>
-    <button class="btn btn-sm btn-link text-secondary py-0 ms-auto" id="btn-show-archived" onclick="toggleArchived()"></button>
+    <span class="fp-alert-text"><i class="bi bi-clock-history me-1"></i><span id="past-alert-text"></span></span>
+    <button class="btn-fp-ghost btn-fp-xs" onclick="archivePast()">Archive Past</button>
+    <button class="btn btn-sm btn-link text-secondary py-0 ms-auto fp-link-btn" id="btn-show-archived" onclick="toggleArchived()"></button>
+  </div>
+</div>
+
+<!-- Trip filter bar -->
+<div class="fp-trip-bar" id="trip-bar">
+  <div class="fp-trip-bar-inner" id="trip-bar-inner">
+    <button class="trip-chip trip-chip-all active" id="chip-all" onclick="selectTrip(null)">
+      <i class="bi bi-grid-3x3-gap-fill me-1"></i>All Routes
+    </button>
+    <div id="trip-chips" class="d-contents"></div>
+    <button class="trip-chip-new" onclick="openTripModal()">
+      <i class="bi bi-plus"></i><span class="ms-1">New Trip</span>
+    </button>
+  </div>
+</div>
+
+<!-- Best combo banner (shown when a trip is selected) -->
+<div id="combo-banner" class="fp-combo-banner d-none">
+  <div class="container-fluid px-3">
+    <div class="combo-inner">
+      <div class="combo-header">
+        <span class="combo-label">BEST COMBO</span>
+        <span class="combo-total-label">TOTAL</span>
+      </div>
+      <div class="combo-body">
+        <div class="combo-legs" id="combo-legs"></div>
+        <div class="combo-total" id="combo-total"></div>
+      </div>
+      <div class="combo-budget-row" id="combo-budget-row"></div>
+    </div>
   </div>
 </div>
 
 <!-- Main content -->
-<div class="container-fluid px-3 py-3" style="padding-bottom: 90px">
+<div class="container-fluid px-3 py-3" style="padding-bottom:100px">
   <div id="routes-grid" class="row g-3">
-    <div class="col-12 text-center py-5 text-secondary" id="empty-state">
-      <i class="bi bi-airplane display-3 d-block mb-3 opacity-25"></i>
-      <p class="mb-1">No routes tracked yet.</p>
-      <button class="btn btn-primary mt-2" onclick="openAddModal()">
-        <i class="bi bi-plus-lg me-1"></i>Add your first route
+    <div class="col-12 py-5 text-center" id="empty-state">
+      <div class="fp-empty-icon"><i class="bi bi-airplane"></i></div>
+      <p class="fp-empty-title">No routes tracked</p>
+      <p class="fp-empty-sub">Add a flight route to start monitoring prices</p>
+      <button class="btn-fp-primary" onclick="openAddModal()">
+        <i class="bi bi-plus-lg me-1"></i>Add First Route
       </button>
     </div>
   </div>
 </div>
 
-<!-- ── Trip Builder bar (sticky bottom) ─────────────────────────────── -->
+<!-- Trip Builder bar -->
 <div id="trip-builder" class="trip-builder d-none">
   <div class="container-fluid px-3">
     <div class="d-flex align-items-center gap-3 flex-wrap">
-      <span class="fw-semibold text-primary"><i class="bi bi-calculator me-1"></i>Trip Builder</span>
+      <span class="fp-trip-label"><i class="bi bi-calculator me-1"></i>Trip Builder</span>
       <div id="trip-builder-items" class="d-flex gap-2 flex-wrap flex-grow-1"></div>
       <div class="d-flex align-items-center gap-3 ms-auto">
-        <span class="text-secondary small" id="trip-builder-count"></span>
-        <span class="fw-bold fs-5" id="trip-builder-total"></span>
-        <button class="btn btn-sm btn-outline-secondary" onclick="clearTripBuilder()">
+        <span class="fp-trip-count" id="trip-builder-count"></span>
+        <span class="fp-trip-total" id="trip-builder-total"></span>
+        <button class="btn-fp-ghost btn-fp-xs" onclick="clearTripBuilder()">
           <i class="bi bi-x-lg me-1"></i>Clear
         </button>
       </div>
@@ -70,21 +103,85 @@
   </div>
 </div>
 
-<!-- ── Add Route Modal ───────────────────────────────────────────────── -->
+<!-- ── Trip Create / Edit Modal ─────────────────────────────────────────── -->
+<div class="modal fade" id="tripModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="trip-modal-title"><i class="bi bi-map me-2"></i>New Trip</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="trip-edit-id">
+
+        <div class="mb-3">
+          <label class="form-label">Trip Name</label>
+          <input type="text" class="form-control form-control-sm" id="trip-name"
+                 placeholder="e.g. Summer Europe 2026" maxlength="60">
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Budget <span class="fp-label-hint">(optional — total for all flights)</span></label>
+          <div class="fp-input-prefix-wrap">
+            <span class="fp-input-prefix">$</span>
+            <input type="number" class="form-control form-control-sm fp-prefixed" id="trip-budget"
+                   placeholder="700" min="0" step="1">
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Color</label>
+          <div class="fp-color-swatches" id="trip-color-swatches"></div>
+        </div>
+
+        <div class="mb-1">
+          <label class="form-label">Notes <span class="fp-label-hint">(optional)</span></label>
+          <textarea class="form-control form-control-sm" id="trip-notes" rows="2"
+                    placeholder="Travel dates, context, etc."></textarea>
+        </div>
+
+        <div id="trip-error" class="fp-error-bar mt-2 d-none"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-fp-ghost btn-fp-danger" id="trip-delete-btn"
+                onclick="confirmDeleteTrip()" style="margin-right:auto;display:none">
+          <i class="bi bi-trash3 me-1"></i>Delete Trip
+        </button>
+        <button type="button" class="btn-fp-ghost" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn-fp-primary" onclick="saveTrip()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add Route Modal ───────────────────────────────────────────────────── -->
 <div class="modal fade" id="addModal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered">
-    <div class="modal-content border-secondary">
-      <div class="modal-header border-secondary">
+    <div class="modal-content">
+      <div class="modal-header">
         <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Add Route</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <div class="alert alert-info small py-2 mb-3">
+        <div class="fp-info-bar mb-3">
           <i class="bi bi-info-circle me-1"></i>
-          Prices will be tracked for your selected date <strong>plus the day before and after</strong> so you can compare flexibility.
+          Prices tracked for selected date <strong>± 1 day</strong> for flexibility comparison.
         </div>
 
-        <!-- Trip type toggle -->
+        <!-- Trip assignment -->
+        <div class="mb-3">
+          <label class="form-label">Trip <span class="fp-label-hint">(optional)</span></label>
+          <div class="d-flex gap-2">
+            <select class="form-select form-select-sm flex-grow-1" id="opt-trip">
+              <option value="">— No trip —</option>
+            </select>
+            <button type="button" class="btn-fp-ghost btn-fp-xs" onclick="openTripModalFromRoute()" title="Create new trip">
+              <i class="bi bi-plus"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Trip type -->
         <div class="mb-3">
           <div class="btn-group w-100" role="group">
             <input type="radio" class="btn-check" name="tripType" id="typeOneWay" value="one_way" checked>
@@ -94,70 +191,70 @@
           </div>
         </div>
 
-        <!-- Outbound segment -->
-        <div class="card bg-dark border-secondary mb-3">
-          <div class="card-header border-secondary text-secondary small">
+        <!-- Outbound -->
+        <div class="fp-segment-card mb-3">
+          <div class="fp-segment-header">
             <i class="bi bi-arrow-right-circle me-1"></i><span id="outbound-label">Flight</span>
           </div>
-          <div class="card-body pb-2">
+          <div class="fp-segment-body">
             <div class="row g-2">
               <div class="col-5">
-                <label class="form-label small mb-1">Origin</label>
-                <input type="text" class="form-control form-control-sm text-uppercase" id="out-origin"
+                <label class="form-label">Origin</label>
+                <input type="text" class="form-control form-control-sm fp-iata-input text-uppercase" id="out-origin"
                        placeholder="JFK" maxlength="3" oninput="this.value=this.value.toUpperCase()">
               </div>
-              <div class="col-2 d-flex align-items-end justify-content-center pb-1">
-                <i class="bi bi-arrow-right text-secondary"></i>
+              <div class="col-2 d-flex align-items-end justify-content-center pb-2">
+                <i class="bi bi-arrow-right fp-arrow-icon"></i>
               </div>
               <div class="col-5">
-                <label class="form-label small mb-1">Destination</label>
-                <input type="text" class="form-control form-control-sm text-uppercase" id="out-dest"
+                <label class="form-label">Destination</label>
+                <input type="text" class="form-control form-control-sm fp-iata-input text-uppercase" id="out-dest"
                        placeholder="LHR" maxlength="3" oninput="this.value=this.value.toUpperCase()">
               </div>
               <div class="col-12">
-                <label class="form-label small mb-1">Departure Date</label>
+                <label class="form-label">Departure Date</label>
                 <input type="date" class="form-control form-control-sm" id="out-date">
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Return segment -->
-        <div class="card bg-dark border-secondary mb-3 d-none" id="return-segment">
-          <div class="card-header border-secondary text-secondary small">
+        <!-- Return -->
+        <div class="fp-segment-card mb-3 d-none" id="return-segment">
+          <div class="fp-segment-header">
             <i class="bi bi-arrow-left-circle me-1"></i>Return
           </div>
-          <div class="card-body pb-2">
+          <div class="fp-segment-body">
             <div class="row g-2">
               <div class="col-5">
-                <label class="form-label small mb-1">Origin</label>
-                <input type="text" class="form-control form-control-sm text-uppercase" id="ret-origin"
+                <label class="form-label">Origin</label>
+                <input type="text" class="form-control form-control-sm fp-iata-input text-uppercase" id="ret-origin"
                        placeholder="LHR" maxlength="3" oninput="this.value=this.value.toUpperCase()">
               </div>
-              <div class="col-2 d-flex align-items-end justify-content-center pb-1">
-                <i class="bi bi-arrow-right text-secondary"></i>
+              <div class="col-2 d-flex align-items-end justify-content-center pb-2">
+                <i class="bi bi-arrow-right fp-arrow-icon"></i>
               </div>
               <div class="col-5">
-                <label class="form-label small mb-1">Destination</label>
-                <input type="text" class="form-control form-control-sm text-uppercase" id="ret-dest"
+                <label class="form-label">Destination</label>
+                <input type="text" class="form-control form-control-sm fp-iata-input text-uppercase" id="ret-dest"
                        placeholder="JFK" maxlength="3" oninput="this.value=this.value.toUpperCase()">
               </div>
               <div class="col-12">
-                <label class="form-label small mb-1">Return Date</label>
+                <label class="form-label">Return Date</label>
                 <input type="date" class="form-control form-control-sm" id="ret-date">
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Shared options -->
+        <!-- Options -->
         <div class="row g-2">
           <div class="col-sm-4">
-            <label class="form-label small mb-1">Adults</label>
+            <label class="form-label">Adults</label>
             <input type="number" class="form-control form-control-sm" id="opt-adults" value="1" min="1" max="9">
           </div>
           <div class="col-sm-4">
-            <label class="form-label small mb-1">Cabin Class</label>
+            <label class="form-label">Cabin Class</label>
             <select class="form-select form-select-sm" id="opt-seat">
               <option value="ECONOMY" selected>Economy</option>
               <option value="PREMIUM_ECONOMY">Premium Economy</option>
@@ -172,18 +269,16 @@
             </div>
           </div>
           <div class="col-12">
-            <label class="form-label small mb-1">
-              Airlines <span class="text-secondary">(optional — IATA codes, comma-separated e.g. AS, DL, UA)</span>
-            </label>
+            <label class="form-label">Airlines <span class="fp-label-hint">(optional — IATA codes, comma-separated: AS, DL, UA)</span></label>
             <input type="text" class="form-control form-control-sm" id="opt-airlines" placeholder="Leave blank for any airline">
           </div>
         </div>
 
-        <div id="add-error" class="alert alert-danger mt-3 d-none small py-2"></div>
+        <div id="add-error" class="fp-error-bar mt-3 d-none"></div>
       </div>
-      <div class="modal-footer border-secondary">
-        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary btn-sm" id="btn-add-route" onclick="addRoute()">
+      <div class="modal-footer">
+        <button type="button" class="btn-fp-ghost" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn-fp-primary" id="btn-add-route" onclick="addRoute()">
           <i class="bi bi-plus-lg me-1"></i>Add Route
         </button>
       </div>
@@ -191,45 +286,43 @@
   </div>
 </div>
 
-<!-- ── Settings Modal ────────────────────────────────────────────────── -->
+<!-- ── Settings Modal ────────────────────────────────────────────────────── -->
 <div class="modal fade" id="settingsModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content border-secondary">
-      <div class="modal-header border-secondary">
-        <h5 class="modal-title"><i class="bi bi-gear me-2"></i>Settings</h5>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-sliders me-2"></i>Settings</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <label class="form-label small mb-1">Poll Interval (minutes)</label>
+        <label class="form-label">Poll Interval (minutes)</label>
         <input type="number" class="form-control form-control-sm mb-1" id="setting-interval" min="15" max="10080" placeholder="480">
-        <div class="text-secondary small mb-4">Min 15 min · Max 10080 (1 week) · Default 480 = 3× per day</div>
-
-        <hr class="border-secondary">
-
+        <div class="fp-hint mb-4">Min 15 · Max 10080 (1 week) · Default 480 = 3× per day</div>
+        <hr class="fp-divider">
         <div class="d-flex align-items-center justify-content-between mt-3">
           <div>
-            <div class="small fw-semibold">Pushover Notifications</div>
-            <div class="text-secondary" style="font-size:0.75rem">Send a test alert to verify your credentials are working.</div>
+            <div class="fp-setting-label">Pushover Notifications</div>
+            <div class="fp-hint">Send a test alert to verify credentials.</div>
           </div>
-          <button class="btn btn-sm btn-outline-secondary ms-3" id="btn-test-notify" onclick="testNotification()">
-            <i class="bi bi-bell me-1"></i>Send Test
+          <button class="btn-fp-ghost ms-3" id="btn-test-notify" onclick="testNotification()">
+            <i class="bi bi-bell me-1"></i>Test
           </button>
         </div>
         <div id="notify-result" class="mt-2 small d-none"></div>
       </div>
-      <div class="modal-footer border-secondary">
-        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary btn-sm" onclick="saveSettings()">Save</button>
+      <div class="modal-footer">
+        <button type="button" class="btn-fp-ghost" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn-fp-primary" onclick="saveSettings()">Save</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ── Expanded chart modal ──────────────────────────────────────────── -->
+<!-- ── Chart Modal ───────────────────────────────────────────────────────── -->
 <div class="modal fade" id="chartModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-lg">
-    <div class="modal-content border-secondary">
-      <div class="modal-header border-secondary">
+    <div class="modal-content">
+      <div class="modal-header">
         <h5 class="modal-title" id="chart-modal-title">Price History</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>

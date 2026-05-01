@@ -1,5 +1,6 @@
 import sqlite3
 import json
+from collections import defaultdict
 from datetime import datetime, timezone
 
 
@@ -14,20 +15,31 @@ def init_db(db_path: str):
     _migrate(db_path)
     with _connect(db_path) as conn:
         conn.executescript("""
+            CREATE TABLE IF NOT EXISTS trips (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT    NOT NULL,
+                notes       TEXT,
+                budget      REAL,
+                color       TEXT    NOT NULL DEFAULT '#00cfe0',
+                created_at  TEXT    NOT NULL,
+                last_combo  REAL
+            );
+
             CREATE TABLE IF NOT EXISTS routes (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                trip_id       INTEGER,
-                leg_label     TEXT    NOT NULL DEFAULT 'outbound',
-                origin        TEXT    NOT NULL,
-                destination   TEXT    NOT NULL,
-                departure_date TEXT   NOT NULL,
-                non_stop_only INTEGER NOT NULL DEFAULT 0,
-                airlines      TEXT,
-                adults        INTEGER NOT NULL DEFAULT 1,
-                seat_type     TEXT    NOT NULL DEFAULT 'ECONOMY',
-                active        INTEGER NOT NULL DEFAULT 1,
-                created_at    TEXT    NOT NULL,
-                day_offset    INTEGER NOT NULL DEFAULT 0
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                trip_id         INTEGER,
+                named_trip_id   INTEGER REFERENCES trips(id),
+                leg_label       TEXT    NOT NULL DEFAULT 'outbound',
+                origin          TEXT    NOT NULL,
+                destination     TEXT    NOT NULL,
+                departure_date  TEXT    NOT NULL,
+                non_stop_only   INTEGER NOT NULL DEFAULT 0,
+                airlines        TEXT,
+                adults          INTEGER NOT NULL DEFAULT 1,
+                seat_type       TEXT    NOT NULL DEFAULT 'ECONOMY',
+                active          INTEGER NOT NULL DEFAULT 1,
+                created_at      TEXT    NOT NULL,
+                day_offset      INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS price_history (
@@ -51,6 +63,7 @@ def _migrate(db_path: str):
     with _connect(db_path) as conn:
         for stmt in [
             "ALTER TABLE routes ADD COLUMN day_offset INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE routes ADD COLUMN named_trip_id INTEGER REFERENCES trips(id)",
         ]:
             try:
                 conn.execute(stmt)
@@ -100,14 +113,14 @@ def count_archived_routes(db_path: str) -> int:
 def add_route(db_path: str, trip_id: int | None, leg_label: str, origin: str,
               destination: str, departure_date: str, non_stop_only: bool,
               airlines: list | None, adults: int, seat_type: str,
-              day_offset: int = 0) -> int:
+              day_offset: int = 0, named_trip_id: int | None = None) -> int:
     with _connect(db_path) as conn:
         cur = conn.execute(
             """INSERT INTO routes
-               (trip_id, leg_label, origin, destination, departure_date,
+               (trip_id, named_trip_id, leg_label, origin, destination, departure_date,
                 non_stop_only, airlines, adults, seat_type, active, created_at, day_offset)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
-            (trip_id, leg_label, origin.upper(), destination.upper(),
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+            (trip_id, named_trip_id, leg_label, origin.upper(), destination.upper(),
              departure_date, int(non_stop_only),
              json.dumps(airlines) if airlines else None,
              adults, seat_type, _now(), day_offset)
@@ -132,6 +145,113 @@ def next_trip_id(db_path: str) -> int:
 def delete_route(db_path: str, route_id: int):
     with _connect(db_path) as conn:
         conn.execute("DELETE FROM routes WHERE id = ?", (route_id,))
+
+
+# ── Named Trips ─────────────────────────────────────────────────────────────
+
+def create_named_trip(db_path: str, name: str, notes: str | None = None,
+                      budget: float | None = None, color: str = '#00cfe0') -> int:
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            "INSERT INTO trips (name, notes, budget, color, created_at) VALUES (?, ?, ?, ?, ?)",
+            (name.strip(), notes or None, budget, color, _now())
+        )
+    return cur.lastrowid
+
+
+def get_named_trips(db_path: str) -> list[dict]:
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            """SELECT t.*, COUNT(r.id) AS route_count
+               FROM trips t
+               LEFT JOIN routes r ON r.named_trip_id = t.id AND r.active = 1
+               GROUP BY t.id
+               ORDER BY t.created_at ASC"""
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_named_trip(db_path: str, trip_id: int, name: str,
+                      notes: str | None, budget: float | None, color: str):
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE trips SET name=?, notes=?, budget=?, color=? WHERE id=?",
+            (name.strip(), notes or None, budget, color, trip_id)
+        )
+
+
+def delete_named_trip(db_path: str, trip_id: int):
+    with _connect(db_path) as conn:
+        conn.execute("UPDATE routes SET named_trip_id = NULL WHERE named_trip_id = ?", (trip_id,))
+        conn.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
+
+
+def update_trip_last_combo(db_path: str, trip_id: int, combo_total: float | None):
+    with _connect(db_path) as conn:
+        conn.execute("UPDATE trips SET last_combo = ? WHERE id = ?", (combo_total, trip_id))
+
+
+def get_best_combo(db_path: str, named_trip_id: int) -> dict:
+    """
+    For each leg-group (trip_id) in this named trip, find the cheapest valid
+    combination of date variants. For round-trips, outbound must precede return.
+    Returns the overall best total and the specific route records chosen.
+    """
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            """SELECT r.id, r.trip_id, r.leg_label, r.origin, r.destination,
+                      r.departure_date, r.day_offset,
+                      (SELECT ph.price FROM price_history ph
+                       WHERE ph.route_id = r.id AND ph.price IS NOT NULL
+                       ORDER BY ph.checked_at DESC LIMIT 1) AS price
+               FROM routes r
+               WHERE r.named_trip_id = ? AND r.active = 1
+               ORDER BY r.trip_id, r.leg_label, r.day_offset""",
+            (named_trip_id,)
+        ).fetchall()
+
+    if not rows:
+        return {'total': None, 'legs': [], 'has_prices': False}
+
+    # Group by booking segment (trip_id), then by leg_label
+    segments: dict[int, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        segments[r['trip_id']][r['leg_label']].append(dict(r))
+
+    grand_total = 0.0
+    best_legs: list[dict] = []
+    has_prices = False
+
+    for leg_groups in segments.values():
+        labels = sorted(leg_groups.keys(), key=lambda l: (l != 'outbound', l))
+        priced = [[v for v in leg_groups[lbl] if v['price'] is not None] for lbl in labels]
+
+        best_total: float | None = None
+        best_combo: list[dict] | None = None
+
+        def _search(idx: int, chosen: list, running: float, last_date: str):
+            nonlocal best_total, best_combo
+            if idx == len(labels):
+                if best_total is None or running < best_total:
+                    best_total = running
+                    best_combo = list(chosen)
+                return
+            for v in priced[idx]:
+                if v['departure_date'] > last_date:
+                    _search(idx + 1, chosen + [v], running + v['price'], v['departure_date'])
+
+        _search(0, [], 0.0, '0000-00-00')
+
+        if best_total is not None and best_combo is not None:
+            grand_total += best_total
+            best_legs.extend(best_combo)
+            has_prices = True
+
+    return {
+        'total': round(grand_total, 2) if has_prices else None,
+        'legs': best_legs,
+        'has_prices': has_prices,
+    }
 
 
 # ── Price history ──────────────────────────────────────────────────────────
@@ -189,7 +309,6 @@ def get_latest_price_for_routes(db_path: str, route_ids: list[int]) -> dict[int,
 
 
 def get_previous_price_for_routes(db_path: str, route_ids: list[int]) -> dict[int, float | None]:
-    """Returns the second-to-last price per route for change indicators."""
     if not route_ids:
         return {}
     result = {}

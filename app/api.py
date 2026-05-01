@@ -5,10 +5,11 @@ from flask import Blueprint, current_app, jsonify, render_template, request
 
 from .db import (
     add_route, archive_past_routes, count_archived_routes,
-    delete_route, delete_routes_batch, get_all_routes,
-    get_latest_price_for_routes, get_previous_price_for_routes,
+    create_named_trip, delete_named_trip, delete_route, delete_routes_batch,
+    get_all_routes, get_best_combo, get_latest_price_for_routes,
+    get_named_trips, get_previous_price_for_routes,
     get_price_history, get_price_stats_for_routes,
-    get_setting, next_trip_id, set_setting,
+    get_setting, next_trip_id, set_setting, update_named_trip,
 )
 from .pushover import send_pushover
 from .scheduler import check_all_routes, reschedule
@@ -79,11 +80,14 @@ def list_routes():
 @bp.route('/api/routes', methods=['POST'])
 def create_routes():
     data = request.get_json(force=True)
-    trip_type = data.get('trip_type', 'one_way')
-    adults    = int(data.get('adults', 1))
-    seat_type = data.get('seat_type', 'ECONOMY').upper()
-    non_stop  = bool(data.get('non_stop_only', False))
-    airlines  = [a.strip().upper() for a in data.get('airlines', []) if a.strip()] or None
+    trip_type     = data.get('trip_type', 'one_way')
+    adults        = int(data.get('adults', 1))
+    seat_type     = data.get('seat_type', 'ECONOMY').upper()
+    non_stop      = bool(data.get('non_stop_only', False))
+    airlines      = [a.strip().upper() for a in data.get('airlines', []) if a.strip()] or None
+    named_trip_id = data.get('named_trip_id') or None
+    if named_trip_id is not None:
+        named_trip_id = int(named_trip_id)
 
     created = []
     tid = next_trip_id(_db())
@@ -98,6 +102,7 @@ def create_routes():
                 _db(), tid, leg_label,
                 seg['origin'], seg['destination'], date_str,
                 non_stop, airlines, adults, seat_type, offset,
+                named_trip_id=named_trip_id,
             )
             created.append(rid)
 
@@ -137,6 +142,72 @@ def route_history(route_id: int):
     for h in history:
         h['flight_details'] = json.loads(h['flight_details']) if h['flight_details'] else None
     return jsonify(history)
+
+
+# ── Named Trips ────────────────────────────────────────────────────────────
+
+@bp.route('/api/named-trips', methods=['GET'])
+def list_named_trips():
+    trips = get_named_trips(_db())
+    result = []
+    for t in trips:
+        entry = dict(t)
+        combo = get_best_combo(_db(), t['id'])
+        entry['best_combo'] = combo
+        if t['budget'] and combo['has_prices']:
+            entry['budget_remaining'] = round(t['budget'] - combo['total'], 2)
+        else:
+            entry['budget_remaining'] = None
+        result.append(entry)
+    return jsonify(result)
+
+
+@bp.route('/api/named-trips', methods=['POST'])
+def create_trip():
+    data = request.get_json(force=True)
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+    budget = data.get('budget')
+    if budget is not None:
+        budget = float(budget)
+    trip_id = create_named_trip(
+        _db(), name,
+        notes=data.get('notes') or None,
+        budget=budget,
+        color=data.get('color', '#00cfe0'),
+    )
+    return jsonify({'id': trip_id}), 201
+
+
+@bp.route('/api/named-trips/<int:trip_id>', methods=['PUT'])
+def update_trip(trip_id: int):
+    data = request.get_json(force=True)
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+    budget = data.get('budget')
+    if budget is not None:
+        budget = float(budget)
+    update_named_trip(
+        _db(), trip_id, name,
+        notes=data.get('notes') or None,
+        budget=budget,
+        color=data.get('color', '#00cfe0'),
+    )
+    return jsonify({'ok': True})
+
+
+@bp.route('/api/named-trips/<int:trip_id>', methods=['DELETE'])
+def remove_trip(trip_id: int):
+    delete_named_trip(_db(), trip_id)
+    return jsonify({'ok': True})
+
+
+@bp.route('/api/named-trips/<int:trip_id>/combo', methods=['GET'])
+def trip_combo(trip_id: int):
+    combo = get_best_combo(_db(), trip_id)
+    return jsonify(combo)
 
 
 # ── Manual poll ────────────────────────────────────────────────────────────

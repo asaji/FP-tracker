@@ -329,10 +329,10 @@ function renderMiniChart(routeId, history) {
   const data = buildChartData(history);
   if (!data.length) {
     const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#6e7681';
-    ctx.font = '10px sans-serif';
+    ctx.fillStyle = '#263d52';
+    ctx.font = "10px 'Barlow Condensed', sans-serif";
     ctx.textAlign = 'center';
-    ctx.fillText('No data yet', canvas.width / 2, 30);
+    ctx.fillText('NO DATA YET', canvas.width / 2, 30);
     return;
   }
 
@@ -349,13 +349,14 @@ function chartConfig(data, mini = false) {
     data: {
       datasets: [{
         data,
-        borderColor: '#58a6ff',
-        backgroundColor: 'rgba(88,166,255,0.08)',
+        borderColor: '#00cfe0',
+        backgroundColor: 'rgba(0,207,224,0.06)',
         borderWidth: mini ? 1.5 : 2,
-        pointRadius: mini ? 2 : 4,
-        pointHoverRadius: mini ? 4 : 6,
+        pointRadius: mini ? 0 : 3,
+        pointHoverRadius: mini ? 3 : 5,
+        pointBackgroundColor: '#00cfe0',
         fill: true,
-        tension: 0.3,
+        tension: 0.35,
       }]
     },
     options: {
@@ -364,20 +365,28 @@ function chartConfig(data, mini = false) {
       animation: false,
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: ctx => `$${Math.round(ctx.parsed.y).toLocaleString()}` } }
+        tooltip: {
+          backgroundColor: '#0a1828',
+          borderColor: '#193860',
+          borderWidth: 1,
+          titleColor: '#4a7090',
+          bodyColor: '#f0b22a',
+          bodyFont: { family: "'JetBrains Mono', monospace", size: 12 },
+          callbacks: { label: ctx => `$${Math.round(ctx.parsed.y).toLocaleString()}` }
+        }
       },
       scales: {
         x: {
           type: 'time',
           time: { tooltipFormat: 'MMM d, h:mm a' },
-          grid: { color: mini ? 'transparent' : '#21262d' },
-          ticks: { display: !mini, color: '#8b949e', maxRotation: 0, maxTicksLimit: 6 }
+          grid: { color: mini ? 'transparent' : '#0f2035' },
+          ticks: { display: !mini, color: '#4a7090', maxRotation: 0, maxTicksLimit: 6, font: { size: 10 } }
         },
         y: {
           min: minP - pad,
           max: maxP + pad,
-          grid: { color: mini ? 'transparent' : '#21262d' },
-          ticks: { display: !mini, color: '#8b949e', callback: v => `$${Math.round(v).toLocaleString()}` }
+          grid: { color: mini ? 'transparent' : '#0f2035' },
+          ticks: { display: !mini, color: '#4a7090', callback: v => `$${Math.round(v).toLocaleString()}`, font: { size: 10 } }
         }
       }
     }
@@ -401,10 +410,10 @@ async function openChartModal(routeId, title) {
         expandedChart = new Chart(canvas, chartConfig(data, false));
       } else {
         const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#6e7681';
-        ctx.font = '14px sans-serif';
+        ctx.fillStyle = '#263d52';
+        ctx.font = "13px 'Barlow Condensed', sans-serif";
         ctx.textAlign = 'center';
-        ctx.fillText('No price data yet', canvas.width / 2, 60);
+        ctx.fillText('NO PRICE DATA YET', canvas.width / 2, 60);
       }
     } catch (e) { console.error('Chart modal error:', e); }
   }, { once: true });
