@@ -9,7 +9,7 @@ from .db import (
     get_all_routes, get_best_combo, get_latest_price_for_routes,
     get_named_trips, get_previous_price_for_routes,
     get_price_history, get_price_stats_for_routes,
-    get_setting, next_trip_id, set_setting, update_named_trip,
+    get_setting, next_trip_id, set_routes_notify, set_setting, update_named_trip,
 )
 from .pushover import send_pushover
 from .scheduler import check_all_routes, reschedule
@@ -113,6 +113,15 @@ def create_routes():
 def remove_route(route_id: int):
     delete_route(_db(), route_id)
     return jsonify({'deleted': route_id})
+
+
+@bp.route('/api/routes/notify', methods=['PATCH'])
+def set_notify():
+    data = request.get_json(force=True)
+    ids = [int(i) for i in data.get('ids', [])]
+    notify = 1 if data.get('notify') else 0
+    set_routes_notify(_db(), ids, notify)
+    return jsonify({'ok': True, 'notify': notify})
 
 
 @bp.route('/api/routes/batch', methods=['DELETE'])

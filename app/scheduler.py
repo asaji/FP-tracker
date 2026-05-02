@@ -76,7 +76,8 @@ def check_all_routes(db_path: str):
                 })
                 save_price_history(db_path, route['id'], price, 'USD', details)
 
-                if last_price is not None and price != last_price and route['day_offset'] == 0:
+                if (last_price is not None and price != last_price
+                        and route['day_offset'] == 0 and route.get('notify') == 1):
                     diff = price - last_price
                     airlines_str = ', '.join(airlines) if airlines else 'any airline'
                     direction = 'dropped' if diff < 0 else 'increased'

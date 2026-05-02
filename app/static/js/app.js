@@ -207,6 +207,11 @@ function buildLegSection(leg, isRoundTrip) {
   const isPast   = leg.dates.every(r => r.departure_date < today);
   const pastBadge = isPast ? `<span class="past-badge me-2">PAST</span>` : '';
 
+  const notifyOn = leg.dates.some(r => r.notify === 1);
+  const bellClass = notifyOn ? 'btn-warning' : 'btn-outline-secondary';
+  const bellIcon  = notifyOn ? 'bi-bell-fill' : 'bi-bell';
+  const bellTitle = notifyOn ? 'Notifications on — click to disable' : 'Notifications off — click to enable';
+
   section.innerHTML = `
     <div class="d-flex justify-content-between align-items-start mb-3">
       <div>
@@ -214,10 +219,19 @@ function buildLegSection(leg, isRoundTrip) {
         <span class="fw-bold fs-5">${leg.origin} → ${leg.destination}</span>
         <div class="text-secondary small mt-1">${seatLabel}${adults}${nonstop} · ${airlinesStr}</div>
       </div>
-      <button class="btn btn-sm btn-outline-danger py-0 px-1"
-              onclick="deleteLegGroup([${leg.ids.join(',')}])" title="Remove">
-        <i class="bi bi-trash3 small"></i>
-      </button>
+      <div class="d-flex gap-1">
+        <button class="btn btn-sm ${bellClass} py-0 px-1 notify-btn"
+                id="notify-btn-${leg.ids[0]}"
+                data-ids="${leg.ids.join(',')}"
+                data-notify="${notifyOn ? '1' : '0'}"
+                onclick="toggleLegNotify(this)" title="${bellTitle}">
+          <i class="bi ${bellIcon} small"></i>
+        </button>
+        <button class="btn btn-sm btn-outline-danger py-0 px-1"
+                onclick="deleteLegGroup([${leg.ids.join(',')}])" title="Remove">
+          <i class="bi bi-trash3 small"></i>
+        </button>
+      </div>
     </div>
     <div class="row g-2" id="dates-${leg.ids[0]}"></div>
   `;
@@ -485,6 +499,25 @@ function clearTripBuilder() {
   }
   tripSelection.clear();
   renderTripBuilder();
+}
+
+// ── Notify toggle ──────────────────────────────────────────────────────────
+async function toggleLegNotify(btn) {
+  const ids    = btn.dataset.ids.split(',').map(Number);
+  const notify = btn.dataset.notify === '1' ? 0 : 1;
+  try {
+    await fetch('/api/routes/notify', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, notify }),
+    });
+    btn.dataset.notify = notify ? '1' : '0';
+    btn.className = `btn btn-sm ${notify ? 'btn-warning' : 'btn-outline-secondary'} py-0 px-1 notify-btn`;
+    btn.title     = notify ? 'Notifications on — click to disable' : 'Notifications off — click to enable';
+    btn.querySelector('i').className = `bi ${notify ? 'bi-bell-fill' : 'bi-bell'} small`;
+  } catch (e) {
+    console.error('Failed to update notify setting:', e);
+  }
 }
 
 // ── Delete ─────────────────────────────────────────────────────────────────

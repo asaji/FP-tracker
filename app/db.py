@@ -39,7 +39,8 @@ def init_db(db_path: str):
                 seat_type       TEXT    NOT NULL DEFAULT 'ECONOMY',
                 active          INTEGER NOT NULL DEFAULT 1,
                 created_at      TEXT    NOT NULL,
-                day_offset      INTEGER NOT NULL DEFAULT 0
+                day_offset      INTEGER NOT NULL DEFAULT 0,
+                notify          INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS price_history (
@@ -64,6 +65,7 @@ def _migrate(db_path: str):
         for stmt in [
             "ALTER TABLE routes ADD COLUMN day_offset INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE routes ADD COLUMN named_trip_id INTEGER REFERENCES trips(id)",
+            "ALTER TABLE routes ADD COLUMN notify INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 conn.execute(stmt)
@@ -126,6 +128,17 @@ def add_route(db_path: str, trip_id: int | None, leg_label: str, origin: str,
              adults, seat_type, _now(), day_offset)
         )
     return cur.lastrowid
+
+
+def set_routes_notify(db_path: str, route_ids: list[int], notify: int):
+    if not route_ids:
+        return
+    placeholders = ','.join('?' * len(route_ids))
+    with _connect(db_path) as conn:
+        conn.execute(
+            f"UPDATE routes SET notify = ? WHERE id IN ({placeholders})",
+            [notify] + list(route_ids)
+        )
 
 
 def delete_routes_batch(db_path: str, route_ids: list[int]):
