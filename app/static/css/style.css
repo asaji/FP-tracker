@@ -464,7 +464,7 @@ body {
   background: var(--c-card);
   border: 1px solid var(--c-border);
   border-radius: var(--radius);
-  padding: 18px;
+  padding: 12px;
   position: relative;
   overflow: hidden;
   transition: border-color 0.2s;
@@ -491,9 +491,9 @@ body {
 /* leg header rendered by app.js */
 .group-card .fw-bold.fs-5 {
   font-family: var(--font-ui);
-  font-size: 1.55rem !important;
+  font-size: 1.3rem !important;
   font-weight: 700;
-  letter-spacing: 3px;
+  letter-spacing: 2px;
   color: var(--c-text);
 }
 
@@ -546,7 +546,7 @@ body {
   background: var(--c-subcard);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-sm);
-  padding: 10px 8px 8px;
+  padding: 7px 6px 6px;
   cursor: pointer;
   position: relative;
   transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
@@ -614,7 +614,7 @@ body {
 /* ── Price display ───────────────────────────────────────────────────── */
 .price-display {
   font-family: var(--font-data);
-  font-size: 1.25rem;
+  font-size: 1.1rem;
   font-weight: 700;
   letter-spacing: -0.5px;
   color: var(--c-amber);
@@ -1066,8 +1066,8 @@ body {
   }
 
   /* Tighter group cards */
-  .group-card { padding: 14px 12px; }
-  .group-card .fw-bold.fs-5 { font-size: 1.2rem !important; letter-spacing: 1.5px; }
+  .group-card { padding: 10px 10px; }
+  .group-card .fw-bold.fs-5 { font-size: 1.05rem !important; letter-spacing: 1.5px; }
   .group-card .text-secondary.small { font-size: 0.65rem !important; }
 
   /* Date subcards: horizontal swipe instead of 3-col grid */

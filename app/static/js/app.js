@@ -97,15 +97,14 @@ function selectTrip(id) {
 }
 
 function applyTripFilter() {
-  const filtered = selectedNamedTripId === null
-    ? routes
-    : routes.filter(r => r.named_trip_id === selectedNamedTripId);
-  renderRoutes(filtered);
-  if (selectedNamedTripId !== null) {
-    renderComboBanner(selectedNamedTripId);
-  } else {
+  if (selectedNamedTripId === null) {
+    renderRoutes(routes, null);
     document.getElementById('combo-banner').classList.add('d-none');
+    return;
   }
+  const filtered = routes.filter(r => Number(r.named_trip_id) === selectedNamedTripId);
+  renderRoutes(filtered, selectedNamedTripId);
+  renderComboBanner(selectedNamedTripId);
 }
 
 async function renderComboBanner(tripId) {
@@ -369,7 +368,7 @@ function buildTripGroups(routes) {
 }
 
 // ── Render ─────────────────────────────────────────────────────────────────
-function renderRoutes(routes) {
+function renderRoutes(routes, activeTripId = null) {
   const grid  = document.getElementById('routes-grid');
   const empty = document.getElementById('empty-state');
 
@@ -377,6 +376,16 @@ function renderRoutes(routes) {
   Object.keys(miniCharts).forEach(k => delete miniCharts[k]);
 
   if (!routes.length) {
+    const titleEl = empty.querySelector('.fp-empty-title');
+    const subEl   = empty.querySelector('.fp-empty-sub');
+    if (activeTripId) {
+      const trip = namedTrips.find(t => t.id === activeTripId);
+      titleEl.textContent = `No routes in "${trip?.name || 'this trip'}"`;
+      subEl.textContent   = 'Use the tag button on any route card to assign it to this trip.';
+    } else {
+      titleEl.textContent = 'No routes tracked';
+      subEl.textContent   = 'Add a flight route to start monitoring prices';
+    }
     grid.innerHTML = '';
     grid.appendChild(empty);
     empty.classList.remove('d-none');
@@ -388,7 +397,7 @@ function renderRoutes(routes) {
 
   for (const group of buildTripGroups(routes)) {
     const col = document.createElement('div');
-    col.className = 'col-12 col-xl-6';
+    col.className = 'col-12 col-lg-6';
     col.appendChild(buildGroupCard(group));
     grid.appendChild(col);
   }
@@ -443,7 +452,7 @@ function buildLegSection(leg, isRoundTrip) {
   ).join('');
 
   section.innerHTML = `
-    <div class="d-flex justify-content-between align-items-start mb-3">
+    <div class="d-flex justify-content-between align-items-start mb-2">
       <div>
         ${pastBadge}${legBadge}
         <span class="fw-bold fs-5">${leg.origin} → ${leg.destination}</span>
@@ -518,9 +527,9 @@ function buildDateSubcard(r) {
     <div class="text-center small mb-1">${r.departure_date}</div>
     <div class="text-center mb-0">${priceHtml}</div>
     <div class="text-center mb-1">${trendHtml}</div>
-    <div class="text-center mb-2">${statsHtml}</div>
-    <div class="text-center text-secondary mb-2" style="font-size:0.65rem">checked ${lastChecked}</div>
-    <div class="chart-area" style="height:70px"
+    <div class="text-center mb-1">${statsHtml}</div>
+    <div class="chart-area" style="height:48px"
+         title="checked ${lastChecked}"
          onclick="openChartModal(${r.id}, '${r.origin}→${r.destination} · ${r.departure_date}')">
       <canvas id="chart-${r.id}"></canvas>
     </div>
