@@ -376,18 +376,15 @@ function renderRoutes(routes, activeTripId = null) {
   Object.keys(miniCharts).forEach(k => delete miniCharts[k]);
 
   if (!routes.length) {
-    const titleEl = empty.querySelector('.fp-empty-title');
-    const subEl   = empty.querySelector('.fp-empty-sub');
     if (activeTripId) {
       const trip = namedTrips.find(t => t.id === activeTripId);
-      titleEl.textContent = `No routes in "${trip?.name || 'this trip'}"`;
-      subEl.textContent   = 'Use the tag button on any route card to assign it to this trip.';
+      empty.querySelector('.fp-empty-title').textContent = `No routes in "${trip?.name || 'this trip'}"`;
+      empty.querySelector('.fp-empty-sub').textContent   = 'Use the tag button on any route card to assign it to this trip.';
     } else {
-      titleEl.textContent = 'No routes tracked';
-      subEl.textContent   = 'Add a flight route to start monitoring prices';
+      empty.querySelector('.fp-empty-title').textContent = 'No routes tracked';
+      empty.querySelector('.fp-empty-sub').textContent   = 'Add a flight route to start monitoring prices';
     }
     grid.innerHTML = '';
-    grid.appendChild(empty);
     empty.classList.remove('d-none');
     return;
   }
