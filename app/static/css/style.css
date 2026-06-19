@@ -209,6 +209,17 @@ body {
   border-color: var(--c-border-hi) !important;
 }
 
+/* ── Danger ghost button variant ────────────────────────────────────── */
+.btn-fp-danger {
+  color: var(--c-red) !important;
+  border-color: rgba(255, 79, 79, 0.3) !important;
+}
+.btn-fp-danger:hover {
+  background: rgba(255, 79, 79, 0.08) !important;
+  border-color: rgba(255, 79, 79, 0.5) !important;
+  color: var(--c-red) !important;
+}
+
 /* ── Trip filter bar ─────────────────────────────────────────────────── */
 .fp-trip-bar {
   position: sticky;
@@ -262,6 +273,39 @@ body {
   border-color: rgba(0, 207, 224, 0.4);
 }
 
+/* trip chip internals */
+.trip-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 5px;
+  flex-shrink: 0;
+}
+
+.trip-chip-count {
+  font-size: 0.6rem;
+  opacity: 0.5;
+  margin-left: 4px;
+}
+
+.trip-chip-edit {
+  opacity: 0;
+  margin-left: 5px;
+  font-size: 0.5rem;
+  color: var(--c-text-dim);
+  transition: opacity 0.15s;
+  line-height: 1;
+}
+
+.trip-chip:hover .trip-chip-edit {
+  opacity: 0.55;
+}
+
+.trip-chip-edit:hover {
+  opacity: 1 !important;
+}
+
 .trip-chip-new {
   display: inline-flex;
   align-items: center;
@@ -307,6 +351,112 @@ body {
   letter-spacing: 0.5px;
   color: var(--c-text-muted) !important;
   text-decoration: none !important;
+}
+
+/* ── Combo banner ────────────────────────────────────────────────────── */
+.fp-combo-banner {
+  background: rgba(0, 22, 14, 0.90);
+  border-bottom: 1px solid rgba(0, 224, 154, 0.18);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  padding: 8px 0;
+}
+
+.combo-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.combo-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.combo-label {
+  font-family: var(--font-ui);
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--c-green);
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.combo-total-label {
+  font-family: var(--font-ui);
+  font-size: 0.58rem;
+  letter-spacing: 2px;
+  color: var(--c-text-dim);
+  text-transform: uppercase;
+}
+
+.combo-body {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.combo-legs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  flex: 1;
+}
+
+.combo-leg {
+  font-family: var(--font-data);
+  font-size: 0.78rem;
+  color: var(--c-text);
+}
+
+.combo-leg-date {
+  font-size: 0.65rem;
+  color: var(--c-text-dim);
+  margin-left: 5px;
+}
+
+.combo-total {
+  font-family: var(--font-data);
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--c-green);
+  white-space: nowrap;
+}
+
+.combo-budget-row {
+  font-family: var(--font-ui);
+  font-size: 0.65rem;
+  letter-spacing: 0.3px;
+  color: var(--c-text-dim);
+}
+
+/* ── Color swatches ──────────────────────────────────────────────────── */
+.fp-color-swatches {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.color-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: transform 0.12s, border-color 0.12s;
+  flex-shrink: 0;
+}
+
+.color-swatch:hover {
+  transform: scale(1.18);
+}
+
+.color-swatch.selected {
+  border-color: #fff;
+  transform: scale(1.18);
 }
 
 /* ── Route group cards ───────────────────────────────────────────────── */

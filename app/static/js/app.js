@@ -6,13 +6,23 @@ const miniCharts = {};
 let expandedChart = null;
 let showArchived = false;
 
+let namedTrips = [];
+let selectedNamedTripId = null;
+let _tripFromRouteModal = false;
+
 // trip builder: map of route_id -> {label, price}
 const tripSelection = new Map();
+
+const TRIP_COLORS = [
+  '#00cfe0', '#00e09a', '#f0b22a', '#ff4f4f',
+  '#a78bfa', '#fb923c', '#38bdf8', '#f472b6',
+];
 
 // ── Init ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   loadRoutes();
   loadSettings();
+  loadNamedTrips();
 
   document.querySelectorAll('input[name="tripType"]').forEach(radio => {
     radio.addEventListener('change', e => {
@@ -34,15 +44,226 @@ function autoFillReturn() {
   }
 }
 
+// ── Named trips ────────────────────────────────────────────────────────────
+async function loadNamedTrips() {
+  try {
+    const res = await fetch('/api/named-trips');
+    namedTrips = await res.json();
+    renderTripChips();
+    populateTripDropdown();
+  } catch (e) {
+    console.error('Failed to load named trips:', e);
+  }
+}
+
+function renderTripChips() {
+  const container = document.getElementById('trip-chips');
+  container.innerHTML = '';
+  for (const t of namedTrips) {
+    const chip = document.createElement('button');
+    chip.className = `trip-chip${selectedNamedTripId === t.id ? ' active' : ''}`;
+    chip.innerHTML = `
+      <span class="trip-chip-dot" style="background:${t.color}"></span>
+      ${t.name}
+      ${t.route_count > 0 ? `<span class="trip-chip-count">${t.route_count}</span>` : ''}
+      <span class="trip-chip-edit" onclick="event.stopPropagation();openEditTripModal(${t.id})">
+        <i class="bi bi-pencil-fill"></i>
+      </span>`;
+    chip.onclick = () => selectTrip(t.id);
+    container.appendChild(chip);
+  }
+  document.getElementById('chip-all').classList.toggle('active', selectedNamedTripId === null);
+}
+
+function populateTripDropdown() {
+  const select = document.getElementById('opt-trip');
+  const currentVal = select.value;
+  select.innerHTML = '<option value="">— No trip —</option>';
+  for (const t of namedTrips) {
+    const opt = document.createElement('option');
+    opt.value = t.id;
+    opt.textContent = t.name;
+    select.appendChild(opt);
+  }
+  if (currentVal && namedTrips.some(t => String(t.id) === currentVal)) {
+    select.value = currentVal;
+  }
+}
+
+function selectTrip(id) {
+  selectedNamedTripId = id;
+  renderTripChips();
+  applyTripFilter();
+}
+
+function applyTripFilter() {
+  const filtered = selectedNamedTripId === null
+    ? routes
+    : routes.filter(r => r.named_trip_id === selectedNamedTripId);
+  renderRoutes(filtered);
+  if (selectedNamedTripId !== null) {
+    renderComboBanner(selectedNamedTripId);
+  } else {
+    document.getElementById('combo-banner').classList.add('d-none');
+  }
+}
+
+async function renderComboBanner(tripId) {
+  try {
+    const res   = await fetch(`/api/named-trips/${tripId}/combo`);
+    const combo = await res.json();
+    const banner = document.getElementById('combo-banner');
+
+    if (!combo.has_prices) {
+      banner.classList.add('d-none');
+      return;
+    }
+
+    document.getElementById('combo-legs').innerHTML = combo.legs
+      .map(l => `<span class="combo-leg">${l.origin}→${l.destination} <strong>$${Math.round(l.price).toLocaleString()}</strong><span class="combo-leg-date">${l.departure_date}</span></span>`)
+      .join('');
+    document.getElementById('combo-total').textContent = `$${Math.round(combo.total).toLocaleString()}`;
+
+    const trip    = namedTrips.find(t => t.id === tripId);
+    const budgetEl = document.getElementById('combo-budget-row');
+    if (trip?.budget) {
+      const remaining = trip.budget - combo.total;
+      const color = remaining >= 0 ? 'var(--c-green)' : 'var(--c-red)';
+      budgetEl.innerHTML = `Budget $${Math.round(trip.budget).toLocaleString()} · <span style="color:${color}">${remaining < 0 ? '−' : ''}$${Math.round(Math.abs(remaining)).toLocaleString()} ${remaining >= 0 ? 'under budget' : 'over budget'}</span>`;
+      budgetEl.classList.remove('d-none');
+    } else {
+      budgetEl.classList.add('d-none');
+    }
+
+    banner.classList.remove('d-none');
+  } catch (e) {
+    console.error('Combo banner error:', e);
+  }
+}
+
+function buildColorSwatches(selectedColor) {
+  const container = document.getElementById('trip-color-swatches');
+  container.innerHTML = '';
+  for (const color of TRIP_COLORS) {
+    const swatch = document.createElement('div');
+    swatch.className = `color-swatch${color === selectedColor ? ' selected' : ''}`;
+    swatch.style.background = color;
+    swatch.dataset.color = color;
+    swatch.onclick = () => {
+      container.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
+      swatch.classList.add('selected');
+    };
+    container.appendChild(swatch);
+  }
+}
+
+function openTripModal() {
+  _tripFromRouteModal = false;
+  document.getElementById('trip-modal-title').innerHTML = '<i class="bi bi-map me-2"></i>New Trip';
+  document.getElementById('trip-edit-id').value = '';
+  document.getElementById('trip-name').value = '';
+  document.getElementById('trip-budget').value = '';
+  document.getElementById('trip-notes').value = '';
+  document.getElementById('trip-delete-btn').style.display = 'none';
+  document.getElementById('trip-error').classList.add('d-none');
+  buildColorSwatches(TRIP_COLORS[0]);
+  new bootstrap.Modal(document.getElementById('tripModal')).show();
+}
+
+function openTripModalFromRoute() {
+  _tripFromRouteModal = true;
+  openTripModal();
+}
+
+function openEditTripModal(tripId) {
+  const trip = namedTrips.find(t => t.id === tripId);
+  if (!trip) return;
+  _tripFromRouteModal = false;
+  document.getElementById('trip-modal-title').innerHTML = '<i class="bi bi-pencil me-2"></i>Edit Trip';
+  document.getElementById('trip-edit-id').value = tripId;
+  document.getElementById('trip-name').value = trip.name;
+  document.getElementById('trip-budget').value = trip.budget ?? '';
+  document.getElementById('trip-notes').value = trip.notes ?? '';
+  document.getElementById('trip-delete-btn').style.display = '';
+  document.getElementById('trip-error').classList.add('d-none');
+  buildColorSwatches(trip.color || TRIP_COLORS[0]);
+  new bootstrap.Modal(document.getElementById('tripModal')).show();
+}
+
+async function saveTrip() {
+  const errEl = document.getElementById('trip-error');
+  errEl.classList.add('d-none');
+  const name = document.getElementById('trip-name').value.trim();
+  if (!name) {
+    errEl.textContent = 'Trip name is required.';
+    errEl.classList.remove('d-none');
+    return;
+  }
+  const editId = document.getElementById('trip-edit-id').value;
+  const budget = document.getElementById('trip-budget').value;
+  const notes  = document.getElementById('trip-notes').value.trim();
+  const swatch = document.querySelector('#trip-color-swatches .color-swatch.selected');
+  const color  = swatch?.dataset.color || TRIP_COLORS[0];
+
+  const body = { name, budget: budget ? parseFloat(budget) : null, notes: notes || null, color };
+  try {
+    let tripId;
+    if (editId) {
+      await fetch(`/api/named-trips/${editId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      tripId = parseInt(editId);
+    } else {
+      const res  = await fetch('/api/named-trips', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      tripId = data.id;
+    }
+    bootstrap.Modal.getInstance(document.getElementById('tripModal')).hide();
+    await loadNamedTrips();
+    if (_tripFromRouteModal) {
+      document.getElementById('opt-trip').value = tripId;
+      _tripFromRouteModal = false;
+    }
+  } catch (e) {
+    errEl.textContent = 'Failed to save trip. Please try again.';
+    errEl.classList.remove('d-none');
+  }
+}
+
+async function confirmDeleteTrip() {
+  const editId = parseInt(document.getElementById('trip-edit-id').value);
+  if (!editId) return;
+  const trip = namedTrips.find(t => t.id === editId);
+  if (!confirm(`Delete "${trip?.name || 'this trip'}"? Routes will stay but become unassigned.`)) return;
+  try {
+    await fetch(`/api/named-trips/${editId}`, { method: 'DELETE' });
+    bootstrap.Modal.getInstance(document.getElementById('tripModal')).hide();
+    if (selectedNamedTripId === editId) {
+      selectedNamedTripId = null;
+      document.getElementById('combo-banner').classList.add('d-none');
+    }
+    await loadNamedTrips();
+    await loadRoutes();
+  } catch (e) {
+    alert('Failed to delete trip.');
+  }
+}
+
 // ── Load & render routes ───────────────────────────────────────────────────
 async function loadRoutes() {
   try {
     const url = showArchived ? '/api/routes?include_archived=1' : '/api/routes';
     const res  = await fetch(url);
     routes = await res.json();
-    renderRoutes(routes);
     updateLastChecked(routes);
     updatePastAlert(routes);
+    applyTripFilter();
   } catch (e) {
     console.error('Failed to load routes:', e);
   }
@@ -72,7 +293,6 @@ function updatePastAlert(routes) {
     alertEl.classList.add('d-none');
   }
 
-  // Always update archived toggle label regardless
   fetch('/api/routes/archived-count')
     .then(r => r.json())
     .then(data => {
@@ -202,7 +422,6 @@ function buildLegSection(leg, isRoundTrip) {
     ? `<span class="badge bg-secondary me-2" style="font-size:0.65rem">${leg.leg_label.toUpperCase()}</span>`
     : '';
 
-  // Check if any date in this leg is past departure
   const today    = new Date().toISOString().slice(0, 10);
   const isPast   = leg.dates.every(r => r.departure_date < today);
   const pastBadge = isPast ? `<span class="past-badge me-2">PAST</span>` : '';
@@ -532,6 +751,7 @@ async function deleteLegGroup(ids) {
       body: JSON.stringify({ ids }),
     });
     await loadRoutes();
+    await loadNamedTrips();
   } catch (e) {
     alert('Failed to delete route group.');
   }
@@ -549,6 +769,8 @@ function openAddModal() {
   document.getElementById('opt-adults').value = 1;
   document.getElementById('opt-seat').value   = 'ECONOMY';
   document.getElementById('opt-nonstop').checked = false;
+  populateTripDropdown();
+  document.getElementById('opt-trip').value = selectedNamedTripId || '';
   new bootstrap.Modal(document.getElementById('addModal')).show();
 }
 
@@ -565,6 +787,8 @@ async function addRoute() {
   const nonStop   = document.getElementById('opt-nonstop').checked;
   const airlinesRaw = document.getElementById('opt-airlines').value;
   const airlines  = airlinesRaw ? airlinesRaw.split(',').map(a => a.trim().toUpperCase()).filter(Boolean) : [];
+  const namedTripIdVal = document.getElementById('opt-trip').value;
+  const namedTripId = namedTripIdVal ? parseInt(namedTripIdVal) : null;
 
   if (!outOrigin || !outDest || !outDate) { showAddError('Origin, destination, and departure date are required.'); return; }
   if (outOrigin.length !== 3 || outDest.length !== 3) { showAddError('Origin and destination must be 3-letter IATA codes (e.g. JFK, LHR).'); return; }
@@ -573,6 +797,7 @@ async function addRoute() {
     trip_type: tripType,
     outbound: { origin: outOrigin, destination: outDest, departure_date: outDate },
     adults, seat_type: seatType, non_stop_only: nonStop, airlines,
+    named_trip_id: namedTripId,
   };
 
   if (tripType === 'round_trip') {
@@ -596,6 +821,7 @@ async function addRoute() {
     if (!res.ok) throw new Error('Server error');
     bootstrap.Modal.getInstance(document.getElementById('addModal')).hide();
     await loadRoutes();
+    await loadNamedTrips();
   } catch (e) {
     showAddError('Failed to add route. Please try again.');
   } finally {
