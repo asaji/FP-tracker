@@ -349,15 +349,16 @@ function buildTripGroups(routes) {
       const ref = dateRoutes[0];
       legs.push({
         leg_label,
-        origin:       ref.origin,
-        destination:  ref.destination,
-        seat_type:    ref.seat_type,
+        origin:        ref.origin,
+        destination:   ref.destination,
+        seat_type:     ref.seat_type,
         non_stop_only: ref.non_stop_only,
-        airlines:     ref.airlines,
-        adults:       ref.adults,
-        dates:        dateRoutes,
-        ids:          dateRoutes.map(r => r.id),
-        is_archived:  dateRoutes.every(r => r.active === 0),
+        airlines:      ref.airlines,
+        adults:        ref.adults,
+        named_trip_id: ref.named_trip_id,
+        dates:         dateRoutes,
+        ids:           dateRoutes.map(r => r.id),
+        is_archived:   dateRoutes.every(r => r.active === 0),
       });
     }
     legs.sort((a, b) => a.leg_label === 'outbound' ? -1 : 1);
@@ -431,6 +432,16 @@ function buildLegSection(leg, isRoundTrip) {
   const bellIcon  = notifyOn ? 'bi-bell-fill' : 'bi-bell';
   const bellTitle = notifyOn ? 'Notifications on — click to disable' : 'Notifications off — click to enable';
 
+  const assignedTrip = namedTrips.find(t => t.id === leg.named_trip_id);
+  const tagStyle = assignedTrip ? `color:${assignedTrip.color};border-color:${assignedTrip.color}40` : '';
+  const tagIcon  = assignedTrip ? 'bi-tag-fill' : 'bi-tag';
+  const tripMenuItems = namedTrips.map(t =>
+    `<li><a class="dropdown-item${leg.named_trip_id === t.id ? ' active' : ''}" href="#"
+            onclick="event.preventDefault();assignLegToTrip([${leg.ids.join(',')}],${t.id})">
+       <span class="trip-assign-dot" style="background:${t.color}"></span>${t.name}
+     </a></li>`
+  ).join('');
+
   section.innerHTML = `
     <div class="d-flex justify-content-between align-items-start mb-3">
       <div>
@@ -438,7 +449,22 @@ function buildLegSection(leg, isRoundTrip) {
         <span class="fw-bold fs-5">${leg.origin} → ${leg.destination}</span>
         <div class="text-secondary small mt-1">${seatLabel}${adults}${nonstop} · ${airlinesStr}</div>
       </div>
-      <div class="d-flex gap-1">
+      <div class="d-flex gap-1 align-items-center">
+        <div class="dropdown">
+          <button class="btn btn-sm btn-outline-secondary py-0 px-1" style="${tagStyle}"
+                  data-bs-toggle="dropdown" title="${assignedTrip ? `Trip: ${assignedTrip.name}` : 'Assign to trip'}">
+            <i class="bi ${tagIcon} small"></i>
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end fp-dropdown">
+            <li><span class="dropdown-header">Assign to trip</span></li>
+            ${tripMenuItems}
+            ${namedTrips.length ? '<li><hr class="dropdown-divider fp-dd-divider"></li>' : ''}
+            <li><a class="dropdown-item${!leg.named_trip_id ? ' active' : ''}" href="#"
+                   onclick="event.preventDefault();assignLegToTrip([${leg.ids.join(',')}],null)">
+              <i class="bi bi-x-circle me-1" style="font-size:0.7rem"></i>No trip
+            </a></li>
+          </ul>
+        </div>
         <button class="btn btn-sm ${bellClass} py-0 px-1 notify-btn"
                 id="notify-btn-${leg.ids[0]}"
                 data-ids="${leg.ids.join(',')}"
@@ -736,6 +762,21 @@ async function toggleLegNotify(btn) {
     btn.querySelector('i').className = `bi ${notify ? 'bi-bell-fill' : 'bi-bell'} small`;
   } catch (e) {
     console.error('Failed to update notify setting:', e);
+  }
+}
+
+// ── Trip assignment ────────────────────────────────────────────────────────
+async function assignLegToTrip(ids, namedTripId) {
+  try {
+    await fetch('/api/routes/assign-trip', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, named_trip_id: namedTripId }),
+    });
+    await loadRoutes();
+    await loadNamedTrips();
+  } catch (e) {
+    alert('Failed to assign trip.');
   }
 }
 

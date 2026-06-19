@@ -141,6 +141,17 @@ def set_routes_notify(db_path: str, route_ids: list[int], notify: int):
         )
 
 
+def assign_routes_to_trip(db_path: str, route_ids: list[int], named_trip_id: int | None):
+    if not route_ids:
+        return
+    placeholders = ','.join('?' * len(route_ids))
+    with _connect(db_path) as conn:
+        conn.execute(
+            f"UPDATE routes SET named_trip_id = ? WHERE id IN ({placeholders})",
+            [named_trip_id] + list(route_ids)
+        )
+
+
 def delete_routes_batch(db_path: str, route_ids: list[int]):
     if not route_ids:
         return

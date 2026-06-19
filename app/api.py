@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, current_app, jsonify, render_template, request
 
 from .db import (
-    add_route, archive_past_routes, count_archived_routes,
+    add_route, archive_past_routes, assign_routes_to_trip, count_archived_routes,
     create_named_trip, delete_named_trip, delete_route, delete_routes_batch,
     get_all_routes, get_best_combo, get_latest_price_for_routes,
     get_named_trips, get_previous_price_for_routes,
@@ -130,6 +130,17 @@ def remove_routes_batch():
     ids = [int(i) for i in data.get('ids', [])]
     delete_routes_batch(_db(), ids)
     return jsonify({'deleted': ids})
+
+
+@bp.route('/api/routes/assign-trip', methods=['PATCH'])
+def assign_trip():
+    data = request.get_json(force=True)
+    ids = [int(i) for i in data.get('ids', [])]
+    named_trip_id = data.get('named_trip_id')
+    if named_trip_id is not None:
+        named_trip_id = int(named_trip_id)
+    assign_routes_to_trip(_db(), ids, named_trip_id)
+    return jsonify({'ok': True})
 
 
 @bp.route('/api/routes/archive-past', methods=['POST'])
