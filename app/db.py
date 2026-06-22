@@ -324,6 +324,7 @@ def get_latest_price_for_routes(db_path: str, route_ids: list[int]) -> dict[int,
                 INNER JOIN (
                     SELECT route_id, MAX(checked_at) AS max_checked
                     FROM price_history
+                    WHERE price IS NOT NULL
                     GROUP BY route_id
                 ) latest ON ph.route_id = latest.route_id AND ph.checked_at = latest.max_checked
                 WHERE ph.route_id IN ({placeholders})""",
